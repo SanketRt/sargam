@@ -114,7 +114,8 @@ sentences so you can see where the model reached.
 | `api` | `pip install anthropic` plus a credential. Model defaults to `claude-opus-5`; override with `SARGAM_MODEL`. Extraction and grounding use structured outputs, so responses cannot fail to parse. |
 | `offline` | No network. Explicit dates and a few relative phrasings only; everything else goes to the unresolved queue. |
 
-Chosen automatically; force with `SARGAM_BACKEND=offline`.
+Chosen automatically; force with `SARGAM_BACKEND=offline`. `--style` only
+affects the `api` backend -- the offline renderer has one voice.
 
 The offline extractor is deliberately narrow, and it refuses to guess. Given
 *"the flood came one year later than the wedding"* it will not anchor that to

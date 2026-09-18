@@ -3,6 +3,7 @@ sargam -- personal memoir engine.
 
     sargam init                 create the store and the manuscript repo
     sargam add "..."            capture a fragment (also reads stdin, or -f)
+    sargam reextract            retry fragments that produced no events
     sargam ask                  answer placement and entity questions
     sargam timeline             the solved chronology
     sargam compile              recompile the manuscript and commit it
@@ -118,6 +119,40 @@ def cmd_add(args) -> None:
                   f"{dim('-> sargam ask')}")
 
 
+def cmd_reextract(args) -> None:
+    """Fragments are captured before extraction runs, so a failure mid-way --
+    no credential, no network, a refusal -- leaves the text safely stored and
+    nothing else. This picks those up and tries again."""
+    with open_store() as st:
+        rows = st.db.execute(
+            "SELECT f.id, f.body FROM fragments f "
+            "LEFT JOIN events e ON e.created_from = f.id "
+            "WHERE e.id IS NULL ORDER BY f.captured_at, f.id").fetchall()
+        if not rows:
+            print(green("every fragment has been extracted"))
+            return
+        print(f"{len(rows)} fragment(s) produced no events "
+              f"{dim('backend: ' + extract.backend())}\n")
+        ok = 0
+        for r in rows:
+            known = {e.id: e.summary for e in st.tl.events.values()}
+            try:
+                out = extract.extract(r["body"], known)
+            except Exception as exc:
+                print(f"  {red('x')} {dim(r['id'])} {exc}")
+                continue
+            rep = extract.apply(st, out, r["id"])
+            E.sweep(st)
+            E.harvest_referring(st)
+            st.mark_dirty(set(rep["events"]))
+            ok += 1
+            print(f"  {green('+')} {dim(r['id'])} {len(rep['events'])} event(s), "
+                  f"{rep['landed']} constraint(s)")
+            for bad in rep["rejected"]:
+                print(f"      {yellow('!')} {bad}")
+        print(f"\n{ok}/{len(rows)} re-extracted")
+
+
 def cmd_timeline(args) -> None:
     with open_store() as st:
         tl = st.tl
@@ -203,6 +238,9 @@ def cmd_compile(args) -> None:
     with open_store() as st:
         if not st.tl.events:
             sys.exit("nothing to compile yet")
+        if args.style != "plain" and extract.backend() == "offline":
+            print(yellow(f"note: --style {args.style} has no effect on the "
+                         f"offline backend; prose style needs the model"))
         book = R.compile_book(st, style=args.style, do_ground=not args.no_ground)
         rep = publish.write(st, book, manuscript(), strip=not args.no_strip)
         sha = publish.commit(rep["repo"], args.message or
@@ -347,6 +385,7 @@ def main(argv=None) -> None:
     a.add_argument("-f", "--file")
     a.set_defaults(fn=cmd_add)
 
+    sub.add_parser("reextract").set_defaults(fn=cmd_reextract)
     sub.add_parser("timeline").set_defaults(fn=cmd_timeline)
 
     k = sub.add_parser("ask")
