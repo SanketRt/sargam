@@ -31,11 +31,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
                                Response)
+from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import accounts as ACC
 from . import api
+from . import extract
 from . import publish
+from . import vault
 from . import workspace as W
 
 BASE_PATH = os.environ.get("SARGAM_BASE_PATH", "").rstrip("/")
@@ -220,13 +223,18 @@ def current_user(request: Request) -> str:
 
 
 def api_key_for(user_id: str) -> str | None:
-    """The caller's own Anthropic credential.
+    """The caller's own Anthropic credential, decrypted for this request only.
 
-    Stage 4 decrypts it from the user's row. Returning None here means calls
-    fall back to the server's environment, which is correct for local use and
-    must never be the answer once there are real accounts.
+    None means the caller has not supplied one. Locally that falls back to the
+    process environment, which is what a single-user install wants. On a
+    server with accounts it means the calls stay on the offline backend rather
+    than quietly spending somebody else's credit.
     """
-    return None
+    if SINGLE_USER:
+        return None
+    if not vault.available():
+        return None
+    return accounts().get_api_key(user_id)
 
 
 @asynccontextmanager
@@ -275,7 +283,7 @@ def healthz() -> dict:
     return {"ok": True, "open_stores": len(registry),
             "max_open": registry.max_open, "evictions": registry.evictions,
             "base_path": BASE_PATH, "single_user": SINGLE_USER,
-            "auth": auth_configured()}
+            "auth": auth_configured(), "vault": vault.available()}
 
 
 # ----------------------------------------------------------------------- auth
@@ -337,7 +345,9 @@ def me(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="sign in required")
     accounts().touch(uid)
     return {"signed_in": True, "single_user": False,
-            "name": row["name"], "email": row["email"]}
+            "name": row["name"], "email": row["email"],
+            "can_store_keys": vault.available(),
+            **accounts().key_status(uid)}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -353,6 +363,39 @@ def state(request: Request) -> Response:
     with lock:
         return Response(api.dumps(api.snapshot(ctx)),
                         media_type="application/json")
+
+
+class KeyIn(BaseModel):
+    api_key: str
+
+
+@app.post("/api/key")
+def set_key(request: Request, body: KeyIn) -> dict:
+    """Store the caller's own credential.
+
+    Validated before it is stored, so a mistyped key fails here rather than
+    half way through a compile. Neither the key nor the validation error text
+    is echoed back: the error can quote the credential.
+    """
+    uid = current_user(request)
+    if not vault.available():
+        raise HTTPException(status_code=503,
+                            detail="this server cannot store credentials")
+    key = (body.api_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="no key supplied")
+    ok, _detail = extract.validate_key(key)
+    if not ok:
+        raise HTTPException(status_code=400,
+                            detail="that key was not accepted by the API")
+    hint = accounts().set_api_key(uid, key)
+    return {"ok": True, "has_key": True, "hint": hint}
+
+
+@app.post("/api/key/clear")
+def clear_key(request: Request) -> dict:
+    accounts().clear_api_key(current_user(request))
+    return {"ok": True, "has_key": False, "hint": None}
 
 
 @app.post("/api/{action}")

@@ -21,6 +21,7 @@ src/sargam/
   store.py      SQLite persistence, point-index stability, schema migration
   workspace.py  per-user paths and the user-id check
   accounts.py   identity, deliberately a different database from any memoir
+  vault.py      sealing a user's own API credential at rest
   extract.py    text -> candidate events and constraints; api + offline backends
   entities.py   alias resolution, merges, referring expressions as questions
   render.py     chapter segmentation, paragraph compilation, the render cache
@@ -81,6 +82,13 @@ allocation rather than assuming it.
 matrix, fingerprinted over the live constraint rows. It is 17-330× faster to
 reopen a store. `test_snapshot_equals_replay` is what licenses trusting it.
 
+**A user's API credential is sealed, and bound to its owner.** `vault.py`
+uses AES-GCM with the account id as associated data, under a master key from
+`SARGAM_KEY_SECRET` that is never in the database. The binding is what stops a
+ciphertext being lifted from one row into another. Only a four-character hint
+is ever readable back, and a key is validated before it is stored. Never log
+it, never return it, never put it in a cache key.
+
 **Multi-tenancy is physical.** One SQLite file per user, ids derived
 (never taken) from Google's subject so they satisfy `SAFE_ID` by construction.
 The **only** thing that may name a workspace is the signed session cookie —
@@ -105,9 +113,10 @@ three.
 Local tool is complete and usable. Hosting is partway:
 
 - done: per-request API keys, per-user workspaces, FastAPI transport,
-  Google sign-in, LRU + idle eviction, solver snapshot
-- next: encrypted bring-your-own-key storage, then the frontend, then deploy
-  to Fly.io proxied at `sanketr.com/projects/sargam`
+  Google sign-in, LRU + idle eviction, solver snapshot, sealed bring-your-own-
+  key storage
+- next: the frontend, then deploy to Fly.io proxied at
+  `sanketr.com/projects/sargam`
 - deferred: subscriptions on the owner's key (needs per-user spend caps and a
   read of Anthropic's commercial terms before any money changes hands)
 

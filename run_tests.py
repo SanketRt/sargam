@@ -11,7 +11,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SUITES = ["test_timeline.py", "test_pipeline.py", "test_workspace.py",
-          "test_server.py"]
+          "test_vault.py", "test_server.py"]
 
 
 def main() -> int:

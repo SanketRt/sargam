@@ -39,6 +39,7 @@ src/sargam/
                 solved-closure snapshot
   workspace.py  per-user paths and the user-id check
   accounts.py   identity, kept apart from anyone's material
+  vault.py      sealing a user's own API credential at rest
   extract.py    text -> candidate events and constraints; api + offline
   entities.py   alias resolution, merges, referring expressions as questions
   render.py     chapter segmentation, paragraph compilation, the render cache
@@ -51,7 +52,7 @@ src/sargam/
   cli.py        the command surface
   schema.sql    the store, including the paragraph build graph
 bin/sargam      entry point, no install needed
-tests/          plain scripts: timeline, pipeline, workspace, server
+tests/          plain scripts: timeline, pipeline, workspace, vault, server
 examples/demo.py
 ```
 
@@ -215,6 +216,17 @@ is built to prevent.
 33. A restored closure is bit-identical to a replay.
 34. A snapshot that no longer matches its constraints is ignored.
 
+`test_vault.py` — credential storage (skipped without `cryptography`):
+
+35. A sealed credential is not its plaintext and round-trips.
+36. A ciphertext will not decrypt for a different account.
+37. A wrong or absent master key fails closed.
+38. The plaintext credential never reaches disk.
+39. A credential row copied between accounts decrypts for neither.
+40. Clearing a credential leaves no hint and no ciphertext.
+41. An accounts database predating credentials migrates in place.
+42. A stored credential reaches its owner alone and is never readable.
+
 ## Hosting
 
 `server.py` serves accounts behind a reverse proxy. Identity is Google OIDC;
@@ -228,6 +240,7 @@ the session is a signed cookie carrying nothing but an opaque account id.
 | `SARGAM_DATA` | where per-user workspaces live |
 | `SARGAM_ACCOUNTS` | the accounts database (defaults beside `SARGAM_DATA`) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth credentials |
+| `SARGAM_KEY_SECRET` | master key for sealing users' API credentials. Generate with `python -c 'from sargam import vault; print(vault.generate())'`. Without it the server runs but cannot store credentials. |
 | `SARGAM_SINGLE` | run as one local user with no accounts |
 | `SARGAM_MAX_OPEN` | how many stores stay loaded (default 24) |
 | `SARGAM_IDLE_SECONDS` | close a store after this long unused (default 900) |
@@ -273,6 +286,26 @@ is 72 MB per constraint, roughly 250 GB to build the network.
 
 The snapshot is fingerprinted over the live constraint rows, so a stale one is
 never adopted, and a test asserts it is bit-identical to a replay.
+
+## Bring your own key
+
+Each account supplies its own Anthropic credential. It is sealed with AES-GCM
+under a master key that lives in the deployment's environment and never in the
+database, so a stolen database file alone decrypts nothing.
+
+The account id is bound in as associated data. That is the point of it: a
+ciphertext lifted from one row and pasted into another fails to decrypt rather
+than quietly handing one account's credential to another. A test does exactly
+that and asserts it decrypts for neither.
+
+Only a hint — the last four characters — is ever readable back. The key is
+validated against the API before it is stored, so a mistyped one fails at
+paste time rather than half way through a compile, and neither the key nor the
+validation error is echoed to the client, because the error text can quote the
+credential.
+
+An account with no key still works: the timeline is solved, placement
+questions are asked, the manuscript compiles. It just writes plainer prose.
 
 ## Known limits
 

@@ -338,6 +338,67 @@ def test_a_busy_store_is_not_evicted() -> None:
     print("ok  a store with a request in flight is skipped, not closed")
 
 
+def test_a_stored_key_is_reachable_only_by_its_owner() -> None:
+    """The credential must reach the caller's own model calls and no one
+    else's, and must never be readable over the API."""
+    try:
+        from sargam import vault
+    except Exception:
+        print("skip  vault unavailable")
+        return
+    saved = os.environ.get(vault.ENV)
+    os.environ[vault.ENV] = vault.generate()
+    KEY = "sk-ant-api03-ONLY-ALICES-KEY-4242"
+    try:
+        with tmproot() as root:
+            acc = ACC.Accounts(root / "accounts.db")
+            alice = acc.upsert_google({"sub": "ga", "email": "a@x.com",
+                                       "name": "A"})
+            bob = acc.upsert_google({"sub": "gb", "email": "b@x.com",
+                                     "name": "B"})
+            acc.close()
+            for u in (alice, bob):
+                W.for_user(u["id"], root).open().close()
+
+            srv = _fresh_server(root)
+            # No network: accept any key that looks like one.
+            srv.extract.validate_key = lambda k: (k.startswith("sk-ant-"),
+                                                  "stubbed")
+            c = TestClient(srv.app)
+
+            c.cookies.set("sargam_session", signed_session({"uid": alice["id"]}))
+            r = c.post("/api/key", json={"api_key": KEY})
+            assert r.status_code == 200, r.text
+            assert KEY not in r.text, "the key was echoed back"
+            assert r.json()["hint"].endswith("4242")
+
+            me = c.get("/api/me").json()
+            assert me["has_key"] is True and me["hint"].endswith("4242")
+            assert KEY not in c.get("/api/me").text, "/api/me leaked the key"
+
+            assert srv.api_key_for(alice["id"]) == KEY, "owner cannot use it"
+            assert srv.api_key_for(bob["id"]) is None, "reachable by another"
+
+            c.cookies.set("sargam_session", signed_session({"uid": bob["id"]}))
+            assert c.get("/api/me").json()["has_key"] is False
+
+            # A bad key is refused before anything is stored.
+            r = c.post("/api/key", json={"api_key": "nonsense"})
+            assert r.status_code == 400, r.status_code
+            assert srv.api_key_for(bob["id"]) is None, "a rejected key stored"
+
+            c.cookies.set("sargam_session", signed_session({"uid": alice["id"]}))
+            assert c.post("/api/key/clear", json={}).status_code == 200
+            assert srv.api_key_for(alice["id"]) is None, "clear did nothing"
+            srv.registry.close()
+    finally:
+        if saved is None:
+            os.environ.pop(vault.ENV, None)
+        else:
+            os.environ[vault.ENV] = saved
+    print("ok  a stored credential reaches its owner alone and is never readable")
+
+
 def test_account_ids_are_derived_not_taken() -> None:
     hostile = "../../../etc/passwd"
     uid = ACC.derive_id(hostile)
@@ -360,5 +421,6 @@ if __name__ == "__main__":
     test_accounts_refuse_a_default_secret()
     test_eviction_bounds_memory_and_preserves_state()
     test_a_busy_store_is_not_evicted()
+    test_a_stored_key_is_reachable_only_by_its_owner()
     test_account_ids_are_derived_not_taken()
     print("\nall server properties hold")

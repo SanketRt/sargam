@@ -241,6 +241,12 @@ summary{cursor:pointer;font-size:12px;color:var(--dim)}
 .err{color:var(--bad);font-size:13px;margin:0 0 16px}
 .btn{display:inline-block;padding:9px 18px;border-radius:8px;
  background:var(--accent);color:var(--bg);text-decoration:none;font-weight:600}
+.keybar{background:var(--card);border:1px solid var(--line);border-radius:10px;
+ padding:12px var(--pad);margin-bottom:var(--pad);display:flex;gap:10px;
+ align-items:center;flex-wrap:wrap;font-size:13px}
+.keybar input{font:inherit;padding:6px 10px;border:1px solid var(--line);
+ border-radius:7px;background:var(--bg);color:var(--fg);min-width:14rem;flex:1}
+.keybar .note{color:var(--dim);font-size:12px;flex-basis:100%;margin:0}
 #who a{color:var(--accent)}
 #toast{position:fixed;left:50%;transform:translateX(-50%);
  bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--fg);
@@ -261,6 +267,7 @@ summary{cursor:pointer;font-size:12px;color:var(--dim)}
     <div id="timeline"></div>
   </section>
   <div style="min-width:0">
+    <div id="keybar"></div>
     <div id="question"></div>
     <section>
       <h2>Manuscript</h2>
@@ -333,6 +340,8 @@ function draw(){
      ${o.n_events?`<span class="tag">${o.n_events}</span>`:''}</button>`).join('')+`</div>`;
  }
 
+ document.getElementById('keybar').innerHTML=keyBar();
+
  document.getElementById('paras').innerHTML=S.paragraphs.length?S.paragraphs.map(pa=>{
   const body=pa.sentences.map(s=>
     `<span class="s-${s.verdict}" title="${esc(s.verdict)}${s.evidence.length?' ← '+esc(s.evidence.join(', ')):''}">${esc(s.text)}</span>`).join(' ');
@@ -351,6 +360,37 @@ function draw(){
   '<p class="empty">Nothing compiled yet. Press Recompile.</p>';
 }
 
+function keyBar(){
+ if(!ME||!ME.signed_in||ME.single_user||!ME.can_store_keys) return '';
+ if(ME.has_key) return `<div class="keybar">
+   <span>Anthropic key <b>${esc(ME.hint||'')}</b> \u2014 used only for your own
+   compiles.</span><span style="flex:1"></span>
+   <button onclick="clearKey()">Remove</button></div>`;
+ return `<div class="keybar">
+   <input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-...">
+   <button class="primary" onclick="saveKey()">Save key</button>
+   <p class="note">Stored encrypted and used only for your compiles. Without
+   one, sargam still solves your timeline and asks placement questions; it
+   just writes plainer prose.</p></div>`;
+}
+async function postStatus(path,body){
+ const r=await fetch(BASE+path,{method:'POST',
+  headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});
+ let j={}; try{j=await r.json();}catch(e){}
+ return {status:r.status, body:j};
+}
+async function saveKey(){
+ const el=document.getElementById('apikey'), key=(el.value||'').trim();
+ if(!key){toast('paste a key first');return;}
+ el.value=''; toast('checking\u2026');
+ const r=await postStatus('/api/key',{api_key:key});
+ toast(r.status===200?'key saved':(r.body.detail||'could not save that key'));
+ await load();
+}
+async function clearKey(){
+ await postStatus('/api/key/clear',{});
+ toast('key removed'); await load();
+}
 async function answer(i){const q=S.question;
  const r=await post('/api/answer',{event_id:q.event_id,prompt:q.prompt,
   options:q.options,choice:i});toast(r.message||'recorded');await load();}

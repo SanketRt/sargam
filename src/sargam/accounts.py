@@ -25,6 +25,8 @@ import hashlib
 import pathlib
 import sqlite3
 
+from . import vault
+
 SCHEMA = """
 PRAGMA journal_mode = WAL;
 
@@ -34,14 +36,25 @@ CREATE TABLE users (
   email        TEXT,
   name         TEXT,
   created_at   TEXT NOT NULL,
-  last_seen_at TEXT NOT NULL
+  last_seen_at TEXT NOT NULL,
+  -- The user's own Anthropic credential, sealed with a master key that lives
+  -- in the environment. The database alone decrypts nothing.
+  api_key_ct     BLOB,
+  api_key_nonce  BLOB,
+  api_key_hint   TEXT,             -- last four characters, safe to show back
+  api_key_set_at TEXT
 );
 CREATE INDEX users_sub ON users(google_sub);
 """
 
 # Columns added after first release. Same contract as store._COLUMN_MIGRATIONS:
 # tables come from SCHEMA, columns need an explicit default.
-_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = []
+_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("users", "api_key_ct", "BLOB"),
+    ("users", "api_key_nonce", "BLOB"),
+    ("users", "api_key_hint", "TEXT"),
+    ("users", "api_key_set_at", "TEXT"),
+]
 
 
 def now() -> str:
@@ -131,6 +144,54 @@ class Accounts:
 
     def count(self) -> int:
         return self.db.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+
+    # ------------------------------------------------------- credentials
+
+    def set_api_key(self, user_id: str, api_key: str) -> str:
+        """Seal and store. Returns the hint. The plaintext is not kept, not
+        logged, and not returned."""
+        ct, nonce = vault.seal(api_key, owner=user_id)
+        h = vault.hint(api_key)
+        cur = self.db.execute(
+            "UPDATE users SET api_key_ct = ?, api_key_nonce = ?, "
+            "api_key_hint = ?, api_key_set_at = ? WHERE id = ?",
+            (ct, nonce, h, now(), user_id))
+        if cur.rowcount == 0:
+            raise KeyError(f"no account {user_id!r}")
+        self.db.commit()
+        return h
+
+    def get_api_key(self, user_id: str) -> str | None:
+        """The stored credential, or None. A row that will not decrypt is
+        treated as absent rather than as an error: the caller's job is to run
+        the product, and the honest state is that there is no usable key."""
+        row = self.db.execute(
+            "SELECT api_key_ct, api_key_nonce FROM users WHERE id = ?",
+            (user_id,)).fetchone()
+        if row is None or row["api_key_ct"] is None:
+            return None
+        try:
+            return vault.open_(row["api_key_ct"], row["api_key_nonce"], user_id)
+        except vault.VaultError:
+            return None
+
+    def clear_api_key(self, user_id: str) -> None:
+        self.db.execute(
+            "UPDATE users SET api_key_ct = NULL, api_key_nonce = NULL, "
+            "api_key_hint = NULL, api_key_set_at = NULL WHERE id = ?",
+            (user_id,))
+        self.db.commit()
+
+    def key_status(self, user_id: str) -> dict:
+        """What the UI may know: whether a key is set and which one it is.
+        Never the key."""
+        row = self.db.execute(
+            "SELECT api_key_ct, api_key_hint, api_key_set_at FROM users "
+            "WHERE id = ?", (user_id,)).fetchone()
+        if row is None or row["api_key_ct"] is None:
+            return {"has_key": False, "hint": None, "set_at": None}
+        return {"has_key": True, "hint": row["api_key_hint"],
+                "set_at": row["api_key_set_at"]}
 
     def delete(self, user_id: str) -> None:
         """Remove the account row. The caller is responsible for the
