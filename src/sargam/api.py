@@ -496,6 +496,8 @@ function signedOut(){
  const p=new URLSearchParams(location.search), err=p.get('error');
  const msg=err==='unverified'
    ? 'That Google account has no verified email address.'
+   : err==='closed'
+   ? 'This is not open to new accounts yet.'
    : err ? 'Sign-in did not complete. Please try again.' : '';
  document.getElementById('stats').textContent='';
  document.getElementById('who').innerHTML='';

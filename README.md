@@ -246,6 +246,7 @@ the session is a signed cookie carrying nothing but an opaque account id.
 | `SARGAM_ACCOUNTS` | the accounts database (defaults beside `SARGAM_DATA`) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth credentials |
 | `SARGAM_KEY_SECRET` | master key for sealing users' API credentials. Generate with `python -c 'from sargam import vault; print(vault.generate())'`. Without it the server runs but cannot store credentials. |
+| `SARGAM_ALLOWED_EMAILS` | who may have an account. Comma-separated addresses, or `@domain` for a whole domain. Empty means open to anyone who signs in. |
 | `SARGAM_SINGLE` | run as one local user with no accounts |
 | `SARGAM_MAX_OPEN` | how many stores stay loaded (default 24) |
 | `SARGAM_IDLE_SECONDS` | close a store after this long unused (default 900) |
@@ -268,6 +269,13 @@ Three things are deliberate rather than incidental:
   many stay loaded is what decides the memory bill. Closing one writes its
   solved closure back, which is why reopening is cheap. Eviction skips a store
   with a request in flight rather than waiting on it.
+* **Admission is decided here, not by the identity provider.** Google's
+  "Testing" publishing status reads like an allowlist and is not one: with
+  non-sensitive scopes it does not reliably stop accounts outside the
+  test-user list, and project members bypass it by design. `SARGAM_ALLOWED_EMAILS`
+  is the actual gate. Leaving it empty is a choice to be open, not a default
+  to fall into. A refused visitor is turned away before any account row or
+  workspace exists, so they consume nothing.
 * **No Google tokens are stored.** Nothing calls Google again after
   identifying the person, so keeping them would be holding a credential for
   no reason.

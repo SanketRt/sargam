@@ -78,6 +78,36 @@ def auth_configured() -> bool:
     return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
 
+def _parse_allowlist(raw: str) -> list[str]:
+    return [e.strip().lower() for e in raw.replace("\n", ",").split(",")
+            if e.strip()]
+
+
+ALLOWED = _parse_allowlist(os.environ.get("SARGAM_ALLOWED_EMAILS", ""))
+
+
+def may_sign_in(email: str | None) -> bool:
+    """Who is allowed an account here.
+
+    Do not rely on the identity provider for this. Google's "Testing"
+    publishing status reads like an allowlist and is not one: with only
+    non-sensitive scopes it does not reliably stop accounts outside the test
+    user list, and project members bypass it by design. Admission is this
+    application's decision, made here, where it can be reasoned about.
+
+    An empty SARGAM_ALLOWED_EMAILS means open to anyone who signs in, which is
+    a deliberate choice rather than an oversight -- but it has to be made.
+    Entries may be full addresses or a bare "@domain" to admit a whole domain.
+    """
+    if not ALLOWED:
+        return True
+    if not email:
+        return False
+    email = email.lower()
+    domain = "@" + email.partition("@")[2]
+    return email in ALLOWED or domain in ALLOWED
+
+
 # ------------------------------------------------------------------ sessions
 
 def _workspace(user_id: str) -> W.Workspace:
@@ -311,7 +341,8 @@ def healthz() -> dict:
     return {"ok": True, "open_stores": len(registry),
             "max_open": registry.max_open, "evictions": registry.evictions,
             "base_path": BASE_PATH, "single_user": SINGLE_USER,
-            "auth": auth_configured(), "vault": vault.available()}
+            "auth": auth_configured(), "vault": vault.available(),
+            "allowlist": len(ALLOWED) or None}
 
 
 # ----------------------------------------------------------------------- auth
@@ -344,6 +375,10 @@ async def callback(request: Request):
         return RedirectResponse(f"{BASE_PATH}/?error=signin")
     if claims.get("email") and claims.get("email_verified") is False:
         return RedirectResponse(f"{BASE_PATH}/?error=unverified")
+    if not may_sign_in(claims.get("email")):
+        # Refused before any account or workspace is created, so a turned-away
+        # visitor leaves nothing behind on the volume.
+        return RedirectResponse(f"{BASE_PATH}/?error=closed")
 
     user = accounts().upsert_google(claims)
     # Only the opaque id goes in the cookie. No tokens: nothing here calls

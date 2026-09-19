@@ -105,6 +105,13 @@ stores; two writing the same user's SQLite file corrupts it. `--workers 1` in
 the entrypoint and a single machine in `fly.toml` are load-bearing, not
 defaults. Scaling out means moving off SQLite first.
 
+**Never treat an identity provider's test mode as access control.** Google's
+"Testing" status was assumed to limit sign-ins to listed test users; on this
+app, with only `openid`/`email`/`profile`, a second account got in anyway and
+Google's own counter still read "1 test, 0 other". Admission lives in
+`server.may_sign_in`, gated by `SARGAM_ALLOWED_EMAILS`, and refusal happens
+before any row or directory is created.
+
 **Multi-tenancy is physical.** One SQLite file per user, ids derived
 (never taken) from Google's subject so they satisfy `SAFE_ID` by construction.
 The **only** thing that may name a workspace is the signed session cookie —

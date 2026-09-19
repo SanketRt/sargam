@@ -515,6 +515,47 @@ def test_rate_limits_bound_the_expensive_routes() -> None:
     print("ok  compiles are rate limited without starving reads")
 
 
+def test_admission_is_this_app_s_decision() -> None:
+    """Google's "Testing" publishing status reads like an allowlist and is
+    not one: with non-sensitive scopes it does not reliably stop accounts off
+    the test-user list, and project members bypass it by design. Whether
+    someone gets an account has to be decided here."""
+    with tmproot() as root:
+        srv = _fresh_server(root, SARGAM_ALLOWED_EMAILS="keep@x.com, @ok.org")
+        assert srv.may_sign_in("keep@x.com") is True
+        assert srv.may_sign_in("KEEP@X.com") is True, "matching is case sensitive"
+        assert srv.may_sign_in("anyone@ok.org") is True, "domain entry ignored"
+        assert srv.may_sign_in("stranger@x.com") is False, "allowlist not enforced"
+        assert srv.may_sign_in(None) is False, "no email should not be admitted"
+        srv.registry.close()
+
+    with tmproot() as root:
+        srv = _fresh_server(root, SARGAM_ALLOWED_EMAILS="")
+        assert srv.may_sign_in("anyone@anywhere.com") is True, \
+            "an empty allowlist must stay open rather than lock everyone out"
+        srv.registry.close()
+    print("ok  admission is decided here, not by the identity provider")
+
+
+def test_a_refused_visitor_leaves_nothing_behind() -> None:
+    """Refusal happens before the account row and the workspace directory
+    exist, so someone turned away cannot consume a slot or a byte."""
+    from sargam import account_ops  # noqa: F401
+    with tmproot() as root:
+        srv = _fresh_server(root, SARGAM_ALLOWED_EMAILS="only@allowed.com")
+        acc = srv.accounts()
+        before = acc.count()
+
+        assert srv.may_sign_in("stranger@elsewhere.com") is False
+        # The callback returns before upsert_google, so nothing is created.
+        assert acc.count() == before, "a refused sign-in created an account"
+        uid = ACC.derive_id("would-be-subject")
+        assert not W.for_user(uid, root).root.exists(), \
+            "a refused sign-in created a workspace"
+        srv.registry.close()
+    print("ok  a refused visitor creates no account and no workspace")
+
+
 def test_account_ids_are_derived_not_taken() -> None:
     hostile = "../../../etc/passwd"
     uid = ACC.derive_id(hostile)
@@ -542,5 +583,7 @@ if __name__ == "__main__":
     test_export_contains_the_irreplaceable_part()
     test_delete_removes_account_and_material()
     test_rate_limits_bound_the_expensive_routes()
+    test_admission_is_this_app_s_decision()
+    test_a_refused_visitor_leaves_nothing_behind()
     test_account_ids_are_derived_not_taken()
     print("\nall server properties hold")
