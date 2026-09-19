@@ -459,7 +459,13 @@ def set_key(request: Request, body: KeyIn) -> dict:
     key = (body.api_key or "").strip()
     if not key:
         raise HTTPException(status_code=400, detail="no key supplied")
-    ok, _detail = extract.validate_key(key)
+    ok, detail = extract.validate_key(key)
+    if not ok and detail == "no-sdk":
+        # The deployment's problem, not the caller's. Saying the key was
+        # rejected would send them to rotate a perfectly good credential.
+        raise HTTPException(
+            status_code=503,
+            detail="this server cannot reach the model right now")
     if not ok:
         raise HTTPException(status_code=400,
                             detail="that key was not accepted by the API")

@@ -23,7 +23,9 @@ docker run --rm \
 import sargam.server as s
 assert s.auth_configured(), "auth not configured in the smoke run"
 assert s.oauth is not None, "oauth client did not construct"
-from sargam import vault, account_ops   # every optional import, eagerly
+from sargam import vault, account_ops, extract   # every optional import, eagerly
+assert extract.sdk_available(), "the anthropic client is not installed"
+assert extract.backend("sk-ant-x") == "api", "a pasted key would not reach the API"
 print("  imports ok, oauth client ok")
 '
 

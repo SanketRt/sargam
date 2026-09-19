@@ -13,3 +13,6 @@ authlib>=1.3
 # httpx2 rather than httpx: authlib warns that the latter is deprecated.
 httpx2>=0.28
 cryptography>=42
+# The model client itself. Without it a pasted key cannot be used, and
+# the failure reads as a rejected key rather than a missing package.
+anthropic>=0.40

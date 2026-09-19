@@ -28,6 +28,18 @@ from .timeline import PROV_ABSOLUTE, PROV_STATED, YEAR
 MODEL = os.environ.get("SARGAM_MODEL", "claude-opus-5")
 
 
+def sdk_available() -> bool:
+    """Whether the model client is installed at all. Distinguishing this from
+    a bad credential matters: one is the deployment's fault and the other is
+    the user's, and telling someone their key was rejected when the package
+    is missing sends them to fix the wrong thing."""
+    try:
+        import anthropic  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def backend(api_key: str | None = None) -> str:
     """Which path a call will take. `api_key` is the caller's own credential --
     in a hosted, multi-tenant setting the key arrives per request rather than
@@ -37,7 +49,10 @@ def backend(api_key: str | None = None) -> str:
     if b == "offline":
         return b
     if api_key:
-        return "api"
+        # A key with no client to use it cannot reach the API. Degrade to the
+        # offline path rather than raising: plainer prose is a far better
+        # outcome for a memoir than a failed compile.
+        return "api" if sdk_available() else "offline"
     if b:
         return b
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
@@ -330,6 +345,8 @@ def _c(kind: str, **kw) -> dict:
 def validate_key(api_key: str) -> tuple[bool, str]:
     """Cheap check that a pasted key works, so a bad one fails at paste time
     rather than half way through a compile. Never echo the key back."""
+    if not sdk_available():
+        return False, "no-sdk"
     try:
         _client(api_key).models.list(limit=1)
     except Exception as exc:
