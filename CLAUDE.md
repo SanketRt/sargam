@@ -36,6 +36,9 @@ src/sargam/
 bin/sargam      entry point (no install needed)
 tests/          plain scripts, no framework
 examples/demo.py
+Dockerfile      git is installed on purpose -- publish.py shells out to it
+deploy/entrypoint.sh   chowns the volume, drops to a non-root user, one worker
+fly.toml        one machine, one volume, scale-to-zero
 ```
 
 ## Running things
@@ -96,6 +99,11 @@ change it there or the two drift apart. The theme is stored under the same
 the key silently breaks that. The palette is monochrome, which leaves the only
 hues on the page for the three grounding verdicts.
 
+**One worker, one machine.** Each worker keeps its own registry of open
+stores; two writing the same user's SQLite file corrupts it. `--workers 1` in
+the entrypoint and a single machine in `fly.toml` are load-bearing, not
+defaults. Scaling out means moving off SQLite first.
+
 **Multi-tenancy is physical.** One SQLite file per user, ids derived
 (never taken) from Google's subject so they satisfy `SAFE_ID` by construction.
 The **only** thing that may name a workspace is the signed session cookie —
@@ -122,8 +130,10 @@ Local tool is complete and usable. Hosting is partway:
 - done: per-request API keys, per-user workspaces, FastAPI transport,
   Google sign-in, LRU + idle eviction, solver snapshot, sealed bring-your-own-
   key storage
-- next: the frontend, then deploy to Fly.io proxied at
-  `sanketr.com/projects/sargam`
+- done: the UI in sanketr.com's design system; Dockerfile, entrypoint and
+  fly.toml, all verified by building and running the image locally
+- next: `fly deploy` (needs flyctl and Google OAuth credentials), the Netlify
+  `_redirects` line, then rate limits, data export and account delete
 - deferred: subscriptions on the owner's key (needs per-user spend caps and a
   read of Anthropic's commercial terms before any money changes hands)
 

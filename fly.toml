@@ -1,0 +1,48 @@
+# Fly.io deployment.
+#
+# One machine, deliberately. The volume attaches to a single machine, and the
+# registry of open stores lives in that process -- a second machine would hold
+# its own copy of the same user's constraint network and the two would
+# overwrite each other. Scale this up only after the store moves off SQLite.
+
+app = "sargam"
+primary_region = "bom"
+
+[build]
+
+[env]
+  SARGAM_DATA = "/data/users"
+  SARGAM_ACCOUNTS = "/data/accounts.db"
+  # What the browser sees. Netlify proxies sanketr.com/projects/sargam here,
+  # and the app never receives that prefix -- it needs it to build page URLs,
+  # to scope the session cookie, and to form the OAuth redirect URI.
+  SARGAM_BASE_PATH = "/projects/sargam"
+  SARGAM_PUBLIC_URL = "https://sanketr.com"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 80
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/healthz"
+  timeout = "5s"
+
+[[mounts]]
+  source = "sargam_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

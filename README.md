@@ -322,6 +322,53 @@ credential.
 An account with no key still works: the timeline is solved, placement
 questions are asked, the manuscript compiles. It just writes plainer prose.
 
+## Deploying
+
+The container is a plain Python image with one non-obvious requirement: **git
+is installed in it**, because the manuscript *is* a git repository and every
+compile shells out to it. An image without git builds fine and fails at the
+first commit.
+
+It runs as a non-root user, on **one worker and one machine, deliberately**.
+Each worker would keep its own registry of open stores, and two of them
+writing the same user's SQLite file is corruption waiting to happen.
+Concurrency here is per-user locks inside a single process.
+
+```
+fly launch --no-deploy                  # uses the committed fly.toml
+fly volumes create sargam_data --size 1 --region bom
+
+fly secrets set \
+  SARGAM_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" \
+  SARGAM_KEY_SECRET="$(python -c 'from sargam import vault;print(vault.generate())')" \
+  GOOGLE_CLIENT_ID=... \
+  GOOGLE_CLIENT_SECRET=...
+
+fly deploy
+```
+
+Then proxy it from the site. In Netlify's `_redirects`:
+
+```
+/projects/sargam/*   https://sargam.fly.dev/:splat   200!
+```
+
+and register this exact redirect URI with Google:
+
+```
+https://sanketr.com/projects/sargam/auth/callback
+```
+
+`SARGAM_BASE_PATH` is what the browser sees, not what the app receives. It is
+used to build page URLs, to scope the session cookie to this app rather than
+the whole domain, and to form that redirect URI. The app answers correctly
+whether or not the proxy strips the prefix, so either `_redirects` style
+works.
+
+Losing `SARGAM_KEY_SECRET` does not lose anyone's memoir -- it makes their
+stored API key undecryptable, and they paste a new one. Losing the volume
+loses everything, so snapshot it.
+
 ## Known limits
 
 * **The dense matrix has a ceiling.** `n` events means a `(2n+1)²` float64
