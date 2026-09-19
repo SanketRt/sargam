@@ -117,6 +117,14 @@ still has open leaves a half-deleted account and a live handle to data that is
 meant to be gone. The account row and the workspace are separate databases, so
 both are removed explicitly.
 
+**A green test suite does not mean the image is deployable.** Tests run in a
+virtualenv containing whatever was ever installed there; the container has
+only `requirements.txt`. Worse, optional imports hide behind configuration --
+authlib is imported only when OAuth credentials are present, so a missing
+dependency can survive every local check and every deploy until the moment
+credentials are set. `deploy/smoke.sh` boots the image with OAuth configured
+for exactly this reason. Run it before any deploy.
+
 ## Conventions
 
 - **No development-history language anywhere** — no "weekend 3", no "not

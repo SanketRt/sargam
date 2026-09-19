@@ -7,4 +7,9 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 itsdangerous>=2.2
 authlib>=1.3
+# authlib's integration layer imports an http client internally and does
+# not declare it. Without this the server imports fine until OAuth is
+# configured, then dies on the first boot that takes that branch.
+# httpx2 rather than httpx: authlib warns that the latter is deprecated.
+httpx2>=0.28
 cryptography>=42

@@ -366,6 +366,18 @@ Nothing that identifies a particular deployment lives in this repository.
 and every credential are set as secrets. Copy `deploy/fly.env.example` to
 `deploy/fly.env` (git-ignored), fill it in, then:
 
+Before deploying, boot the image the way production boots it:
+
+```
+deploy/smoke.sh
+```
+
+The test suite runs in a virtualenv holding whatever was ever installed into
+it, so it cannot tell you a dependency is missing from `requirements.txt`.
+Only a container can, and it has to boot with OAuth configured -- the authlib
+import sits behind a check for credentials, so an image missing its http
+client starts perfectly until the day someone sets them.
+
 ```
 flyctl launch --no-deploy
 flyctl volumes create sargam_data --size 1
