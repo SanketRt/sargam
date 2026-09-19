@@ -1,0 +1,8 @@
+# Core: what the solver and the local CLI need.
+numpy>=1.26
+
+# Hosted server only. The local tool (`sargam web`) runs on the standard
+# library and does not need these.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+itsdangerous>=2.2

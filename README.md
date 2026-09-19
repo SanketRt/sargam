@@ -14,6 +14,10 @@ sargam compile                 # markdown into a git repo, one commit per compil
 sargam web                     # review UI on localhost:7000
 ```
 
+`sargam web` runs on the standard library. `sargam serve` runs the same
+handlers under the server that gets deployed, and needs the hosted extras:
+`python -m venv .venv && .venv/bin/pip install -r requirements.txt`.
+
 No dependencies beyond `numpy`. The model is optional: without a credential
 everything still runs on a rule-based backend (see **Backends**).
 
@@ -38,17 +42,37 @@ schema downstream changes.
 | `publish.py` | markdown out, one git commit per compile |
 | `workspace.py` | per-user paths and the user-id check |
 | `cli.py` | the command surface |
-| `web.py` | review UI, standard library only |
+| `api.py` | the review UI's handlers, with no transport in them |
+| `web.py` | local transport, standard library only |
+| `server.py` | hosted transport, FastAPI |
 | `schema.sql` | the store, including the paragraph build graph |
 | `demo.py` | runnable walkthrough, capture through to a committed manuscript |
-| `test_timeline.py`, `test_pipeline.py`, `test_workspace.py` | the properties worth guarding |
+| `test_timeline.py`, `test_pipeline.py`, `test_workspace.py`, `test_server.py` | the properties worth guarding |
 
 ```
 python demo.py
 python test_timeline.py
 python test_pipeline.py
 python test_workspace.py
+python test_server.py      # skips unless the hosted extras are installed
 ```
+
+## Two transports, one product
+
+The review UI's logic lives in `api.py` and has no transport in it. A handler
+takes `(ctx, body)` and returns a dict; `ctx` carries the store, the
+manuscript path, and the caller's own API key. Two thin adapters sit over it:
+`web.py`, standard library, one store, one lock, for local use; and
+`server.py`, FastAPI, a store resolved per request, for hosting.
+
+The local tool therefore never acquires a web-framework dependency, and the
+hosted app cannot drift into a second implementation of the same product.
+A test asserts the two transports return identical state from one store.
+
+Behind a reverse proxy the browser keeps a path prefix the app never sees, so
+the page is served by `api.page(base)` and builds every URL from that prefix.
+A page with absolute paths works in development and breaks the first time it
+is proxied, which is the worst order to discover it.
 
 ## How it works
 
@@ -164,6 +188,14 @@ is built to prevent.
 18. The backend follows the caller's own credential; the deployment can veto.
 19. The key reaches every model call site.
 20. The key is never written to disk and never enters a cache key.
+
+`test_server.py` — the hosted transport (skipped without the extras):
+
+21. The stdlib and FastAPI transports return the same state.
+22. Each request sees only its own workspace.
+23. An unauthenticated request is refused with no data.
+24. A handler failure returns no server internals.
+25. The page builds every URL from the prefix it was served under.
 
 ## Known limits
 

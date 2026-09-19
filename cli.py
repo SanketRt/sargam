@@ -14,7 +14,8 @@ sargam -- personal memoir engine.
     sargam entities             people and places, with merge suggestions
     sargam merge <keep> <drop>  fold one entity into another
     sargam log                  compile history
-    sargam web                  the review UI on localhost
+    sargam web                  the review UI on localhost (no dependencies)
+    sargam serve                the hosted server, single-user (needs extras)
 
 A project lives in .sargam/ (store.db + manuscript/) under the current
 directory, or wherever SARGAM_HOME points.
@@ -372,6 +373,26 @@ def cmd_log(args) -> None:
                   f"{r['n_flagged']} flagged")
 
 
+def cmd_serve(args) -> None:
+    """Run the hosted server against this machine's workspace.
+
+    Same handlers as `sargam web`, different transport. Useful for trying the
+    thing that will actually be deployed without deploying it."""
+    try:
+        import uvicorn
+    except ImportError:
+        sys.exit("serve needs the hosted extras:\n"
+                 "    python -m venv .venv && .venv/bin/pip install -r "
+                 "requirements.txt\n"
+                 "or use `sargam web`, which needs nothing.")
+    os.environ.setdefault("SARGAM_SINGLE", "1")
+    os.environ.setdefault("SARGAM_HOME", str(home()))
+    print(f"sargam on http://{args.host}:{args.port}"
+          f"{os.environ.get('SARGAM_BASE_PATH', '')}   {dim('(ctrl-c to stop)')}")
+    uvicorn.run("server:app", host=args.host, port=args.port,
+                log_level="warning")
+
+
 def cmd_web(args) -> None:
     import web
     web.serve(db_path(), manuscript(), port=args.port, open_browser=not args.no_open)
@@ -427,6 +448,11 @@ def main(argv=None) -> None:
     m.set_defaults(fn=cmd_merge)
 
     sub.add_parser("log").set_defaults(fn=cmd_log)
+
+    sv = sub.add_parser("serve")
+    sv.add_argument("-p", "--port", type=int, default=8000)
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.set_defaults(fn=cmd_serve)
 
     w = sub.add_parser("web")
     w.add_argument("-p", "--port", type=int, default=7000)
