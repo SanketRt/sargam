@@ -10,7 +10,7 @@
 # rather than committed here. See deploy/fly.env.example.
 
 app = "sargam"
-primary_region = "bom"
+primary_region = "sin"
 
 [build]
 
