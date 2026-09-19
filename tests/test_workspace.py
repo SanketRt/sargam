@@ -80,16 +80,38 @@ def test_backend_follows_the_caller_not_the_server() -> None:
     try:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         assert extract.backend() == "offline", "no credential should be offline"
-        assert extract.backend(FAKE_KEY) == "api", \
-            "a caller's own key must select the api path"
+
+        # A key only reaches the API if there is a client to carry it. This
+        # is not hypothetical: the deployed image once shipped without the
+        # anthropic package, and a pasted key came back as "rejected" rather
+        # than as a missing dependency.
+        if extract.sdk_available():
+            assert extract.backend(FAKE_KEY) == "api", \
+                "a caller's own key must select the api path"
+        else:
+            assert extract.backend(FAKE_KEY) == "offline", \
+                "with no client installed a key must degrade, not pretend"
+
         os.environ["SARGAM_BACKEND"] = "offline"
         assert extract.backend(FAKE_KEY) == "offline", \
             "an explicitly offline deployment must override a caller's key"
+
+        # Having the client installed is not a credential. A server whose
+        # users have not added a key must write plainer prose, not fail.
+        os.environ.pop("SARGAM_BACKEND")
+        assert extract.backend() == "offline", \
+            "an installed client was mistaken for a credential"
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-from-the-environment"
+        try:
+            assert extract.backend() == "api", "an env credential was ignored"
+        finally:
+            os.environ.pop("ANTHROPIC_API_KEY")
     finally:
         os.environ.pop("SARGAM_BACKEND", None)
         if saved is not None:
             os.environ["SARGAM_BACKEND"] = saved
-    print("ok  backend follows the caller's credential, deployment can veto")
+    print(f"ok  backend follows the caller's credential, deployment can veto "
+          f"(sdk {'present' if extract.sdk_available() else 'absent'})")
 
 
 class _Block:

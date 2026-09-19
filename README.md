@@ -151,7 +151,12 @@ sentences so you can see where the model reached.
 | `api` | `pip install anthropic` plus a credential. Model defaults to `claude-opus-5`; override with `SARGAM_MODEL`. Extraction and grounding use structured outputs, so responses cannot fail to parse. |
 | `offline` | No network. Explicit dates and a few relative phrasings only; everything else goes to the unresolved queue. |
 
-Chosen automatically; force with `SARGAM_BACKEND=offline`. `--style` only
+Chosen automatically: a caller's own key, else `ANTHROPIC_API_KEY` in the
+environment, else offline. Having the client installed is not a
+credential -- on a server that would turn “this account has not added a
+key” into a failed compile, when the honest answer is plainer prose. A
+local user relying on an `ant auth login` profile sets `SARGAM_BACKEND=api`.
+Force the other way with `SARGAM_BACKEND=offline`. `--style` only
 affects the `api` backend — the offline renderer has one voice.
 
 Every model entry point also takes an explicit `api_key`, so a caller can

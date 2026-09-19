@@ -56,14 +56,13 @@ def backend(api_key: str | None = None) -> str:
     if b:
         return b
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        return "api"
-    try:
-        import anthropic  # noqa: F401
-    except ImportError:
-        return "offline"
-    # An `ant auth login` profile is resolved by the SDK itself; assume api and
-    # let the first call raise a clear AuthenticationError if there is none.
-    return "api"
+        return "api" if sdk_available() else "offline"
+    # No credential of any kind. Having the client installed is not a reason
+    # to take the API path: on a server that turns "this account has not added
+    # a key" into a failed compile, when the honest answer is plainer prose.
+    # A local user relying on an `ant auth login` profile, which cannot be
+    # detected cheaply from here, sets SARGAM_BACKEND=api.
+    return "offline"
 
 
 EXTRACT_SYSTEM = """\
