@@ -153,8 +153,50 @@ def compile_now(ctx: Ctx, body: dict) -> dict:
             "commit": sha}
 
 
+def capture(ctx: Ctx, body: dict) -> dict:
+    """Take in a piece of writing and land what can be extracted from it.
+
+    The fragment is stored before extraction runs, and on its own commit. If
+    the model is unreachable, or declines, or the network drops, the words
+    survive and `reextract` picks them up later. Losing what someone wrote
+    because a downstream step failed is the one outcome this design cannot
+    tolerate -- everything else is recomputable.
+    """
+    from . import entities as E
+    from . import extract
+
+    st = ctx.store
+    text = (body.get("text") or "").strip()
+    if not text:
+        return {"ok": False, "message": "nothing to add"}
+    if len(text) > 20000:
+        return {"ok": False, "message": "that is too long for one entry"}
+
+    fid = st.add_fragment(text)
+    try:
+        out = extract.extract(text, {e.id: e.summary for e in st.tl.events.values()},
+                              api_key=ctx.api_key)
+    except Exception as exc:
+        return {"ok": True, "fragment": fid, "events": 0, "landed": 0,
+                "message": f"saved, but extraction failed ({type(exc).__name__}). "
+                           f"It will be picked up next time."}
+
+    rep = extract.apply(st, out, fid)
+    E.sweep(st)
+    E.harvest_referring(st)
+    st.mark_dirty(set(rep["events"]))
+    n = len(rep["events"])
+    return {"ok": True, "fragment": fid, "events": n, "landed": rep["landed"],
+            "rejected": rep["rejected"], "unresolved": rep["unresolved"],
+            "needs_placement": len(rep["needs_placement"]),
+            "message": f"{n} event{'' if n == 1 else 's'}, "
+                       f"{rep['landed']} temporal fact"
+                       f"{'' if rep['landed'] == 1 else 's'}"}
+
+
 ROUTES = {"/api/answer": answer, "/api/entity": bind_entity,
-          "/api/freeze": set_frozen, "/api/compile": compile_now}
+          "/api/freeze": set_frozen, "/api/compile": compile_now,
+          "/api/add": capture}
 
 
 # ---------------------------------------------------------------------- page
@@ -341,6 +383,16 @@ details[open] summary::before{transform:rotate(90deg)}
 .keybar .note{color:var(--muted);font-size:.78rem;flex-basis:100%;margin:0;
  line-height:1.55}
 
+textarea#capture{width:100%;font:inherit;font-size:.9rem;line-height:1.6;
+ padding:.7rem .85rem;border:1px solid var(--border-strong);
+ border-radius:var(--radius-sm);background:var(--bg);color:var(--text);
+ resize:vertical;min-height:4.6rem}
+textarea#capture::placeholder{color:var(--faint)}
+textarea#capture:disabled{opacity:.6}
+.capture-row{display:flex;align-items:center;gap:.7rem;margin-top:.7rem;
+ flex-wrap:wrap}
+.capture-row .note{color:var(--muted);font-size:.78rem;flex:1;min-width:12rem;
+ margin:0;line-height:1.5}
 .empty{color:var(--muted);font-size:.85rem}
 .signin{text-align:center;padding:3rem 1rem;max-width:26rem;margin:0 auto}
 .signin h3{font-size:1.15rem;font-weight:600;margin-bottom:.6rem;letter-spacing:-.01em}
@@ -360,6 +412,7 @@ details[open] summary::before{transform:rotate(90deg)}
  <symbol id="i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
  <symbol id="i-book-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+ <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
 </svg>
 
@@ -384,6 +437,16 @@ details[open] summary::before{transform:rotate(90deg)}
     <div id="timeline"></div>
   </section>
   <div style="min-width:0">
+    <section class="card" style="margin-bottom:1.25rem">
+      <div class="section-head"><svg class="icon"><use href="#i-pen"/></svg>
+        <h2>Add a memory</h2></div>
+      <textarea id="capture" rows="3" placeholder="Whatever you remember, in whatever order it comes out. Dates if you have them, &quot;a couple of years before&quot; if you don't."></textarea>
+      <div class="capture-row">
+        <span class="note" id="capture-note">Written down first, understood
+        second. Nothing you type is lost if the rest fails.</span>
+        <button class="btn btn-sm btn-solid" onclick="capture()">Add</button>
+      </div>
+    </section>
     <div id="keybar"></div>
     <div id="question"></div>
     <section class="card">
@@ -524,11 +587,23 @@ function accountBar(){
 async function deleteAccount(){
  const phrase='delete everything';
  const said=prompt('This removes your account, every fragment and the whole '
-  +'manuscript. It cannot be undone.\n\nType "'+phrase+'" to confirm:');
+  +'manuscript. It cannot be undone.\\n\\nType \"'+phrase+'\" to confirm:');
  if(said!==phrase){toast('not deleted');return;}
  const r=await postStatus('/api/account/delete',{confirm:phrase});
  if(r.status===200){location.href=BASE+'/';}
  else{toast(r.body.detail||'could not delete');}
+}
+async function capture(){
+ const el=document.getElementById('capture'), text=(el.value||'').trim();
+ if(!text){toast('write something first');return;}
+ el.disabled=true; toast('reading\u2026');
+ const r=await post('/api/add',{text:text});
+ el.disabled=false;
+ if(r.ok){el.value='';}
+ toast(r.message||'added');
+ if(r.ok&&r.needs_placement){toast(r.message+' \u2014 '+r.needs_placement+' to place');}
+ await load();
+ el.focus();
 }
 async function answer(i){const q=S.question;
  const r=await post('/api/answer',{event_id:q.event_id,prompt:q.prompt,
