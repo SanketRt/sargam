@@ -424,6 +424,97 @@ def test_a_stored_key_is_reachable_only_by_its_owner() -> None:
     print("ok  a stored credential reaches its owner alone and is never readable")
 
 
+def test_export_contains_the_irreplaceable_part() -> None:
+    """Everything but the fragments can be recomputed. An export that loses
+    them is not an export."""
+    import io, zipfile
+    from sargam import account_ops as OPS
+    with tmproot() as root:
+        ws = W.for_user("uexport", root)
+        st = ws.open()
+        text = "I married Meera in April 1986. The mill job was 1977."
+        _seed(st, text)
+        import sargam.render as R
+        import sargam.publish as publish
+        book = R.compile_book(st, do_ground=False)
+        publish.write(st, book, ws.manuscript)
+
+        blob = OPS.export_zip(st, ws)
+        st.close()
+
+        z = zipfile.ZipFile(io.BytesIO(blob))
+        names = z.namelist()
+        assert any(n.startswith("fragments/") for n in names), names
+        assert "fragments.json" in names and "events.json" in names
+        assert "constraints.json" in names and "README.txt" in names
+        assert any(n.startswith("manuscript/") for n in names), names
+
+        raw = "".join(z.read(n).decode() for n in names
+                      if n.startswith("fragments/"))
+        assert text in raw, "the fragment text is not in the export"
+    print("ok  an export carries the fragments, in plain text")
+
+
+def test_delete_removes_account_and_material() -> None:
+    from sargam import account_ops as OPS
+    with tmproot() as root:
+        acc = ACC.Accounts(root / "accounts.db")
+        u = acc.upsert_google({"sub": "gdel", "email": "d@x.com", "name": "D"})
+        ws = W.for_user(u["id"], root)
+        st = ws.open()
+        _seed(st, "Something private happened in 1986.")
+        st.close()
+        acc.close()
+
+        srv = _fresh_server(root)
+        srv.current_user = lambda request: u["id"]
+        c = TestClient(srv.app)
+        assert c.get("/api/state").status_code == 200   # opens the store
+
+        r = c.post("/api/account/delete", json={"confirm": "wrong"})
+        assert r.status_code == 400, "deleted without the confirmation phrase"
+        assert ws.root.exists(), "material removed on a refused delete"
+
+        r = c.post("/api/account/delete", json={"confirm": "delete everything"})
+        assert r.status_code == 200, r.text
+        assert not ws.root.exists(), "the workspace survived deletion"
+
+        acc2 = ACC.Accounts(root / "accounts.db")
+        assert acc2.get(u["id"]) is None, "the account row survived"
+        acc2.close()
+        srv.registry.close()
+    print("ok  deleting an account removes the row and every file")
+
+
+def test_rate_limits_bound_the_expensive_routes() -> None:
+    with tmproot() as root:
+        acc = ACC.Accounts(root / "accounts.db")
+        u = acc.upsert_google({"sub": "grate", "email": "r@x.com", "name": "R"})
+        acc.close()
+        W.for_user(u["id"], root).open().close()
+
+        srv = _fresh_server(root)
+        srv.current_user = lambda request: u["id"]
+        c = TestClient(srv.app)
+
+        from sargam import account_ops as OPS
+        burst = OPS.LIMITS["compile"][1]
+        codes = [c.post("/api/compile", json={}).status_code
+                 for _ in range(burst + 4)]
+        assert 429 in codes, f"compile was never limited: {codes}"
+        assert codes[0] == 200, codes
+        assert codes.count(200) <= burst, f"burst exceeded: {codes}"
+
+        r = [x for x in
+             [c.post("/api/compile", json={})] if x.status_code == 429][0]
+        assert r.headers.get("Retry-After"), "429 without Retry-After"
+
+        # A cheap route is not caught by the expensive route's bucket.
+        assert c.get("/api/state").status_code == 200, "reads were limited too"
+        srv.registry.close()
+    print("ok  compiles are rate limited without starving reads")
+
+
 def test_account_ids_are_derived_not_taken() -> None:
     hostile = "../../../etc/passwd"
     uid = ACC.derive_id(hostile)
@@ -448,5 +539,8 @@ if __name__ == "__main__":
     test_eviction_bounds_memory_and_preserves_state()
     test_a_busy_store_is_not_evicted()
     test_a_stored_key_is_reachable_only_by_its_owner()
+    test_export_contains_the_irreplaceable_part()
+    test_delete_removes_account_and_material()
+    test_rate_limits_bound_the_expensive_routes()
     test_account_ids_are_derived_not_taken()
     print("\nall server properties hold")

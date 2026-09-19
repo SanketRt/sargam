@@ -22,6 +22,7 @@ src/sargam/
   workspace.py  per-user paths and the user-id check
   accounts.py   identity, deliberately a different database from any memoir
   vault.py      sealing a user's own API credential at rest
+  account_ops.py export, deletion, rate limits
   extract.py    text -> candidate events and constraints; api + offline backends
   entities.py   alias resolution, merges, referring expressions as questions
   render.py     chapter segmentation, paragraph compilation, the render cache
@@ -110,6 +111,12 @@ The **only** thing that may name a workspace is the signed session cookie —
 never a header, query parameter or body field. There is a test that tries all
 three.
 
+**Deletion closes before it unlinks.** `registry.drop` waits for a request
+in flight rather than skipping it, unlike eviction. Removing files the process
+still has open leaves a half-deleted account and a live handle to data that is
+meant to be gone. The account row and the workspace are separate databases, so
+both are removed explicitly.
+
 ## Conventions
 
 - **No development-history language anywhere** — no "weekend 3", no "not
@@ -132,8 +139,9 @@ Local tool is complete and usable. Hosting is partway:
   key storage
 - done: the UI in the host site's design system; Dockerfile, entrypoint and
   fly.toml, all verified by building and running the image locally
-- next: `fly deploy` (needs flyctl and Google OAuth credentials), the Netlify
-  `_redirects` line, then rate limits, data export and account delete
+- done: export, account deletion and per-account rate limits
+- next: `fly deploy` (blocked on Fly billing), Google OAuth credentials, and
+  the reverse-proxy line on the host site
 - deferred: subscriptions on the owner's key (needs per-user spend caps and a
   read of Anthropic's commercial terms before any money changes hands)
 

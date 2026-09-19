@@ -34,6 +34,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import account_ops as OPS
 from . import accounts as ACC
 from . import api
 from . import extract
@@ -169,6 +170,23 @@ class Registry:
         self.evictions += 1
         return True
 
+    def drop(self, user_id: str) -> bool:
+        """Close and forget one user's store, waiting for any request that is
+        using it. Eviction may skip a busy store; deletion may not -- unlinking
+        files the process still has open is how a half-deleted account
+        happens."""
+        with self._guard:
+            entry = self._entries.pop(user_id, None)
+        if entry is None:
+            return False
+        ctx, lock, _seen = entry
+        with lock:
+            try:
+                ctx.store.close()
+            except Exception:
+                pass
+        return True
+
     def close(self) -> None:
         with self._guard:
             for ctx, _lock, _seen in self._entries.values():
@@ -183,6 +201,16 @@ class Registry:
 
 
 registry = Registry()
+limiter = OPS.RateLimiter()
+
+
+def _limit(user_id: str, action: str) -> None:
+    per_minute, burst = OPS.LIMITS[action]
+    ok, wait = limiter.check(user_id, action, per_minute, burst)
+    if not ok:
+        raise HTTPException(
+            status_code=429, detail=f"too many requests; retry in {wait:.0f}s",
+            headers={"Retry-After": str(max(1, int(wait)))})
 
 
 _accounts: ACC.Accounts | None = None
@@ -358,6 +386,7 @@ def index() -> HTMLResponse:
 @app.get("/api/state")
 def state(request: Request) -> Response:
     uid = current_user(request)
+    _limit(uid, "read")
     ctx, lock = registry.ctx(uid)
     ctx.api_key = api_key_for(uid)
     with lock:
@@ -378,6 +407,7 @@ def set_key(request: Request, body: KeyIn) -> dict:
     is echoed back: the error can quote the credential.
     """
     uid = current_user(request)
+    _limit(uid, "key")
     if not vault.available():
         raise HTTPException(status_code=503,
                             detail="this server cannot store credentials")
@@ -398,12 +428,48 @@ def clear_key(request: Request) -> dict:
     return {"ok": True, "has_key": False, "hint": None}
 
 
+@app.get("/api/export")
+def export(request: Request) -> Response:
+    """Everything this account holds, as a zip. Fragments go in as plain text
+    because they are the part that cannot be recomputed."""
+    uid = current_user(request)
+    _limit(uid, "export")
+    ws = _workspace(uid)
+    ctx, lock = registry.ctx(uid)
+    with lock:
+        blob = OPS.export_zip(ctx.store, ws)
+    return Response(
+        blob, media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="sargam-export.zip"'})
+
+
+class DeleteIn(BaseModel):
+    confirm: str = ""
+
+
+@app.post("/api/account/delete")
+def delete_account(request: Request, body: DeleteIn) -> dict:
+    """Remove the account and everything in it. Not recoverable.
+
+    The confirmation is required in the body rather than inferred from the
+    method, so a mis-routed or replayed request cannot destroy a memoir."""
+    uid = current_user(request)
+    if body.confirm != "delete everything":
+        raise HTTPException(status_code=400, detail="confirmation phrase required")
+    ws = _workspace(uid)
+    out = OPS.delete_everything(accounts(), ws, registry)
+    limiter.forget(uid)
+    request.session.clear()
+    return out
+
+
 @app.post("/api/{action}")
 async def action(action: str, request: Request) -> Response:
     fn = api.ROUTES.get(f"/api/{action}")
     if fn is None:
         raise HTTPException(status_code=404, detail="no such action")
     uid = current_user(request)
+    _limit(uid, "compile" if action == "compile" else "write")
     ctx, lock = registry.ctx(uid)
     ctx.api_key = api_key_for(uid)
     raw = await request.body()

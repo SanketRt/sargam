@@ -390,6 +390,7 @@ details[open] summary::before{transform:rotate(90deg)}
       <div class="section-head"><svg class="icon"><use href="#i-book-open"/></svg><h2>Manuscript</h2></div>
       <div id="paras"></div>
     </section>
+    <div id="account"></div>
   </div>
 </main>
 <div id="toast"></div>
@@ -490,6 +491,7 @@ function draw(){
  }
 
  document.getElementById('keybar').innerHTML=keyBar();
+ document.getElementById('account').innerHTML=accountBar();
 
  document.getElementById('paras').innerHTML=S.paragraphs.length?S.paragraphs.map(pa=>{
   const body=pa.sentences.map(s=>
@@ -510,6 +512,24 @@ function draw(){
   '<p class="empty">Nothing compiled yet. Press Recompile.</p>';
 }
 
+function accountBar(){
+ if(!ME||!ME.signed_in||ME.single_user) return '';
+ return `<div class="keybar" style="margin-top:1.25rem;margin-bottom:0">
+   <span class="note" style="flex-basis:auto;flex:1;margin:0">Your material is
+   yours. Take a copy whenever you like, or remove all of it.</span>
+   <a class="btn btn-sm" href="${BASE}/api/export">Export</a>
+   <button class="btn btn-sm" onclick="deleteAccount()">Delete account</button>
+ </div>`;
+}
+async function deleteAccount(){
+ const phrase='delete everything';
+ const said=prompt('This removes your account, every fragment and the whole '
+  +'manuscript. It cannot be undone.\n\nType "'+phrase+'" to confirm:');
+ if(said!==phrase){toast('not deleted');return;}
+ const r=await postStatus('/api/account/delete',{confirm:phrase});
+ if(r.status===200){location.href=BASE+'/';}
+ else{toast(r.body.detail||'could not delete');}
+}
 async function answer(i){const q=S.question;
  const r=await post('/api/answer',{event_id:q.event_id,prompt:q.prompt,
   options:q.options,choice:i});toast(r.message||'recorded');await load();}

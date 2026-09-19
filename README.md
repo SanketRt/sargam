@@ -40,6 +40,7 @@ src/sargam/
   workspace.py  per-user paths and the user-id check
   accounts.py   identity, kept apart from anyone's material
   vault.py      sealing a user's own API credential at rest
+  account_ops.py export, deletion, rate limits
   extract.py    text -> candidate events and constraints; api + offline
   entities.py   alias resolution, merges, referring expressions as questions
   render.py     chapter segmentation, paragraph compilation, the render cache
@@ -227,6 +228,9 @@ is built to prevent.
 41. An accounts database predating credentials migrates in place.
 42. A stored credential reaches its owner alone and is never readable.
 43. The page shares the site's theme, typeface and path prefix.
+44. An export carries the fragments, in plain text.
+45. Deleting an account removes the row and every file.
+46. Compiles are rate limited without starving reads.
 
 ## Hosting
 
@@ -322,6 +326,28 @@ credential.
 
 An account with no key still works: the timeline is solved, placement
 questions are asked, the manuscript compiles. It just writes plainer prose.
+
+## It stays yours
+
+Two things exist because of what this stores, and both were written before
+anyone trusted it with real material — retrofitting deletion onto a system
+that never planned for it is how half-deleted accounts happen.
+
+**Export** hands back a zip. The fragments go in as plain text, one file each,
+because they are the only irreplaceable part: events, constraints and the
+whole manuscript are derived from them. The structured layers go in as JSON
+beside them, and the compiled chapters as markdown.
+
+**Deletion** removes the account row and the workspace together. They are
+separate databases on purpose, so both are removed explicitly, and the open
+store is closed first — unlinking files the process still holds is how an
+account ends up half gone. It asks for a typed confirmation phrase in the
+request body rather than inferring intent from the HTTP method.
+
+Compiles and credential checks are rate limited per account. That is not a
+security boundary — a signed-in account is already identified — but one
+enthusiastic loop should not be able to spend an afternoon of someone's API
+credit before anyone notices.
 
 ## Deploying
 
