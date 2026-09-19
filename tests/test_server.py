@@ -537,6 +537,48 @@ def test_admission_is_this_app_s_decision() -> None:
     print("ok  admission is decided here, not by the identity provider")
 
 
+def test_removing_someone_takes_effect_immediately() -> None:
+    """A session cookie lasts thirty days. If admission were checked only at
+    sign-in, removing an account from the allowlist would take a month to mean
+    anything, and anyone admitted before the list existed would keep their
+    access. Revocation has to bite on the next request."""
+    with tmproot() as root:
+        acc = ACC.Accounts(root / "accounts.db")
+        stays = acc.upsert_google({"sub": "gs", "email": "stays@x.com",
+                                   "name": "S"})
+        goes = acc.upsert_google({"sub": "gg", "email": "goes@x.com",
+                                  "name": "G"})
+        acc.close()
+        for u in (stays, goes):
+            W.for_user(u["id"], root).open().close()
+
+        # Both were admitted while the door was open.
+        srv = _fresh_server(root, SARGAM_ALLOWED_EMAILS="")
+        c = TestClient(srv.app)
+        for u in (stays, goes):
+            c.cookies.set("sargam_session", signed_session({"uid": u["id"]}))
+            assert c.get("/api/state").status_code == 200, u["email"]
+        srv.registry.close()
+
+        # The door closes. The same cookies are presented again.
+        srv = _fresh_server(root, SARGAM_ALLOWED_EMAILS="stays@x.com")
+        c = TestClient(srv.app)
+
+        c.cookies.set("sargam_session", signed_session({"uid": stays["id"]}))
+        assert c.get("/api/state").status_code == 200, "allowed account locked out"
+
+        c.cookies.set("sargam_session", signed_session({"uid": goes["id"]}))
+        r = c.get("/api/state")
+        assert r.status_code == 401, \
+            f"a pre-existing session bypassed the allowlist ({r.status_code})"
+        assert "events" not in r.text
+        assert c.get("/api/me").status_code == 401
+        assert c.post("/api/compile", json={}).status_code == 401, \
+            "writes still reachable after revocation"
+        srv.registry.close()
+    print("ok  removing an account cuts off its existing session at once")
+
+
 def test_a_refused_visitor_leaves_nothing_behind() -> None:
     """Refusal happens before the account row and the workspace directory
     exist, so someone turned away cannot consume a slot or a byte."""
@@ -584,6 +626,7 @@ if __name__ == "__main__":
     test_delete_removes_account_and_material()
     test_rate_limits_bound_the_expensive_routes()
     test_admission_is_this_app_s_decision()
+    test_removing_someone_takes_effect_immediately()
     test_a_refused_visitor_leaves_nothing_behind()
     test_account_ids_are_derived_not_taken()
     print("\nall server properties hold")

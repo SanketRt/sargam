@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 Context for working on this repo.
 
@@ -104,11 +104,6 @@ hues on the page for the three grounding verdicts.
 stores; two writing the same user's SQLite file corrupts it. `--workers 1` in
 the entrypoint and a single machine in `fly.toml` are load-bearing, not
 defaults. Scaling out means moving off SQLite first.
-
-**Admission is checked on every request, not at sign-in.** The session
-cookie lasts thirty days; gating only the callback would mean a removal takes
-a month to bite, and anyone admitted before the allowlist existed keeps access
-forever. `current_user` re-reads the account row and re-checks every time.
 
 **Never treat an identity provider's test mode as access control.** Google's
 "Testing" status was assumed to limit sign-ins to listed test users; on this

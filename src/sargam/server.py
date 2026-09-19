@@ -270,7 +270,7 @@ def current_user(request: Request) -> str:
     if not user:
         raise HTTPException(status_code=401, detail="sign in required")
     try:
-        return W.check_id(user)
+        uid = W.check_id(user)
     except W.BadUserId:
         # A validly-signed cookie carrying an id that is not one we would
         # ever have issued. Letting BadUserId escape here would answer with a
@@ -278,6 +278,17 @@ def current_user(request: Request) -> str:
         # session. Drop it so the browser stops presenting it.
         request.session.clear()
         raise HTTPException(status_code=401, detail="sign in required")
+
+    # Admission is checked on every request, not only at sign-in. A session
+    # cookie lasts thirty days; if it were the only check, removing someone
+    # from the allowlist would take a month to mean anything, and an account
+    # admitted before the list existed would keep its access indefinitely.
+    # Revocation has to take effect on the next request, not the next login.
+    row = accounts().get(uid)
+    if row is None or not may_sign_in(row["email"]):
+        request.session.clear()
+        raise HTTPException(status_code=401, detail="sign in required")
+    return uid
 
 
 def api_key_for(user_id: str) -> str | None:
@@ -400,10 +411,9 @@ async def logout(request: Request):
 def me(request: Request) -> dict:
     if SINGLE_USER:
         return {"signed_in": True, "single_user": True, "name": "local"}
-    uid = current_user(request)
+    uid = current_user(request)      # also verifies the account still stands
     row = accounts().get(uid)
     if row is None:
-        # The cookie names an account that no longer exists.
         request.session.clear()
         raise HTTPException(status_code=401, detail="sign in required")
     accounts().touch(uid)

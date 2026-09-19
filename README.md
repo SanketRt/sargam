@@ -273,8 +273,10 @@ Three things are deliberate rather than incidental:
   "Testing" publishing status reads like an allowlist and is not one: with
   non-sensitive scopes it does not reliably stop accounts outside the
   test-user list, and project members bypass it by design. `SARGAM_ALLOWED_EMAILS`
-  is the actual gate. Leaving it empty is a choice to be open, not a default
-  to fall into. A refused visitor is turned away before any account row or
+  is the actual gate, checked on every request rather than at sign-in: a
+  session cookie lasts thirty days, so gating only the callback would mean
+  a removal takes a month to bite. Leaving it empty is a choice to be
+  open, not a default to fall into. A refused visitor is turned away before any account row or
   workspace exists, so they consume nothing.
 * **No Google tokens are stored.** Nothing calls Google again after
   identifying the person, so keeping them would be holding a credential for
