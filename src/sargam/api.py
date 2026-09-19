@@ -19,12 +19,12 @@ import json
 import pathlib
 from dataclasses import dataclass
 
-import ask as A
-import entities as E
-import ground as G
-import publish
-import render as R
-from timeline import YEAR, fmt
+from . import ask as A
+from . import entities as E
+from . import ground as G
+from . import publish
+from . import render as R
+from .timeline import YEAR, fmt
 
 
 @dataclass
@@ -115,7 +115,7 @@ def snapshot(ctx: Ctx) -> dict:
 
 def answer(ctx: Ctx, body: dict) -> dict:
     st = ctx.store
-    import placement as P
+    from . import placement as P
     opts = [P.Option(o["kind"], o["anchor_id"], o["label"])
             for o in body["options"]]
     q = P.Question(event_id=body["event_id"], prompt=body["prompt"],

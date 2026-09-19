@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 
-import extract
+from . import extract
 
 SUPPORTED = "supported"
 INFERRED = "inferred"

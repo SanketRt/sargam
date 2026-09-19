@@ -14,7 +14,12 @@ invariants that, if they broke, would let the system quietly lie to you:
   7. an event with no temporal information renders into the holding section
 """
 
+
 from __future__ import annotations
+
+import pathlib as _pathlib
+import sys as _sys
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 import os
 import pathlib
@@ -25,13 +30,13 @@ os.environ.setdefault("SARGAM_BACKEND", "offline")
 
 import numpy as np
 
-import entities as E
-import extract
-import ground as G
-import publish
-import render as R
-import store as S
-from timeline import INF, PROV_ABSOLUTE, PROV_STATED, YEAR, days
+from sargam import entities as E
+from sargam import extract
+from sargam import ground as G
+from sargam import publish
+from sargam import render as R
+from sargam import store as S
+from sargam.timeline import INF, PROV_ABSOLUTE, PROV_STATED, YEAR, days
 
 
 class tmp:
@@ -329,6 +334,80 @@ def test_unplaced_goes_to_the_holding_section() -> None:
     print("ok  undated events render into a holding section, last")
 
 
+def test_snapshot_equals_replay() -> None:
+    """The solved closure is cached so an evicted store can be reopened
+    without replaying every constraint. If the cached matrix ever differed
+    from what a replay produces, every bound and every ordering downstream
+    would be quietly wrong, so this is the property that licenses the whole
+    optimisation."""
+    with tmp() as t:
+        f, w, p, m = t.seed()
+        # Past the point threshold, or no snapshot is written at all.
+        evs = []
+        base = days("1990-01-01")
+        for i in range(120):
+            ev = t.st.add_event(f"filler {i}", from_fragment=f)
+            evs.append(ev)
+            t.st.assert_constraint(ev.s, 0, base + i * 40, base + i * 40 + 200,
+                                   PROV_ABSOLUTE, f)
+            if i:
+                t.st.assert_constraint(ev.s, evs[i - 1].e, 1.0, 400.0,
+                                       PROV_STATED, f)
+        assert t.st.tl._n >= S.Store.SNAPSHOT_MIN_POINTS, t.st.tl._n
+        path = t.st.path
+        t.st.close()
+
+        snap_store = S.Store(path)
+        from_snapshot = snap_store.tl.D.copy()
+        row = snap_store.db.execute(
+            "SELECT n_points FROM solver_snapshot WHERE id = 1").fetchone()
+        assert row is not None, "no snapshot was written"
+
+        # Drop it and reopen without Store.close(), which would write it back.
+        snap_store.db.execute("DELETE FROM solver_snapshot")
+        snap_store.db.commit()
+        snap_store.db.close()
+
+        replay_store = S.Store(path)
+        from_replay = replay_store.tl.D.copy()
+        assert np.array_equal(from_snapshot, from_replay), \
+            "the cached closure is not what a replay produces"
+        assert len(replay_store.tl.constraints) == len(snap_store.tl.constraints)
+        replay_store.db.close()
+        t.st = S.Store(path)
+    print("ok  a restored closure is bit-identical to a replay")
+
+
+def test_a_stale_snapshot_is_ignored() -> None:
+    """A snapshot that no longer matches the constraint rows must never be
+    adopted. Rather than trusting a counter, the fingerprint is over the live
+    rows themselves."""
+    with tmp() as t:
+        f, w, p, m = t.seed()
+        base = days("1990-01-01")
+        evs = []
+        for i in range(120):
+            ev = t.st.add_event(f"filler {i}", from_fragment=f)
+            evs.append(ev)
+            t.st.assert_constraint(ev.s, 0, base + i * 40, base + i * 40 + 200,
+                                   PROV_ABSOLUTE, f)
+        path = t.st.path
+        t.st.close()
+
+        # Tamper: keep the snapshot, change the constraint set underneath it.
+        con = S.Store(path)
+        fp_before = con._fingerprint()
+        con.db.execute("UPDATE constraints SET retracted = 1 "
+                       "WHERE id = (SELECT MAX(id) FROM constraints)")
+        con.db.commit()
+        assert con._fingerprint() != fp_before, "fingerprint did not move"
+        assert con._snapshot_for(con.tl._n) is None, \
+            "a stale snapshot was accepted"
+        con.db.close()
+        t.st = S.Store(path)
+    print("ok  a snapshot that no longer matches its constraints is ignored")
+
+
 def test_cache_key_ignores_jitter_but_not_meaning() -> None:
     """Bounds move every time a constraint lands. Only a change big enough to
     alter what the prose can say should force a re-render."""
@@ -358,5 +437,7 @@ if __name__ == "__main__":
     test_conflict_is_recorded_not_raised()
     test_merge_loses_no_links()
     test_unplaced_goes_to_the_holding_section()
+    test_snapshot_equals_replay()
+    test_a_stale_snapshot_is_ignored()
     test_cache_key_ignores_jitter_but_not_meaning()
     print("\nall pipeline properties hold")

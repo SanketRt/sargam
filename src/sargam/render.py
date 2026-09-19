@@ -29,7 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from timeline import INF, YEAR, as_date
+from .timeline import INF, YEAR, as_date
 
 STYLES = {
     "plain": (
@@ -251,7 +251,7 @@ def offline_paragraph(tl, event_ids: list[str], sources: dict[str, str]) -> str:
 
 def api_paragraph(tl, event_ids: list[str], sources: dict[str, str],
                   style: str, api_key: str | None = None) -> str:
-    import extract
+    from . import extract
     lines = []
     for eid in event_ids:
         ev = tl.events[eid]
@@ -282,7 +282,7 @@ def write_paragraph(store, event_ids: list[str], style: str,
     keying on the credential would both leak it into the key space and make
     the cache useless in a multi-tenant store.
     """
-    import extract
+    from . import extract
     tl = store.tl
     key = _h(event_set_hash(tl, event_ids) + style_hash(style))
     hit = store.cached_render(key)
@@ -305,7 +305,7 @@ def compile_book(store, style: str = "plain", do_ground: bool = True,
                  api_key: str | None = None) -> dict:
     """Recompile every chapter. Frozen paragraphs whose sources moved are
     flagged and left exactly as they are."""
-    import ground as G
+    from . import ground as G
 
     tl = store.tl
     sh = style_hash(style)

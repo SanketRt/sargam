@@ -24,6 +24,8 @@ from __future__ import annotations
 import os
 import pathlib
 import threading
+import time
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -31,10 +33,10 @@ from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
                                Response)
 from starlette.middleware.sessions import SessionMiddleware
 
-import accounts as ACC
-import api
-import publish
-import workspace as W
+from . import accounts as ACC
+from . import api
+from . import publish
+from . import workspace as W
 
 BASE_PATH = os.environ.get("SARGAM_BASE_PATH", "").rstrip("/")
 SINGLE_USER = os.environ.get("SARGAM_SINGLE", "").lower() in ("1", "true", "yes")
@@ -88,36 +90,89 @@ def _workspace(user_id: str) -> W.Workspace:
     return W.for_user(user_id, W.data_root())
 
 
-class Registry:
-    """Open stores, keyed by user.
+MAX_OPEN = int(os.environ.get("SARGAM_MAX_OPEN", "24"))
+IDLE_SECONDS = int(os.environ.get("SARGAM_IDLE_SECONDS", "900"))
 
-    A Timeline is a dense matrix held in memory, so keeping one loaded per
-    user is the thing that decides what this costs to run. For now every store
-    that is opened stays open; eviction is a separate piece of work and wants
-    a real policy rather than a guess. The lock is per user, not global:
-    two people compiling at once must not queue behind each other.
+
+class Registry:
+    """Open stores, keyed by user, least-recently-used first out.
+
+    A Timeline is a dense matrix held in memory, so how many stay loaded is
+    what decides the memory bill: roughly 1 MB per hundred events, each. Most
+    accounts are idle at any moment, so a small cache of the active ones is
+    enough, and closing a store writes its solved closure back -- reopening it
+    reads that matrix instead of replaying every constraint, which is the
+    difference between milliseconds and seconds.
+
+    Locks are per user, not global: two people compiling at once must not
+    queue behind each other. Eviction only takes a store whose lock is free,
+    so a request in flight is never closed underneath.
     """
 
-    def __init__(self):
-        self._entries: dict[str, tuple] = {}
+    def __init__(self, max_open: int = MAX_OPEN,
+                 idle_seconds: int = IDLE_SECONDS):
+        self._entries: "OrderedDict[str, list]" = OrderedDict()
         self._guard = threading.Lock()
+        self.max_open = max_open
+        self.idle_seconds = idle_seconds
+        self.evictions = 0
 
     def ctx(self, user_id: str) -> tuple:
         with self._guard:
-            hit = self._entries.get(user_id)
-            if hit is None:
+            entry = self._entries.get(user_id)
+            if entry is None:
                 ws = _workspace(user_id)
                 store = ws.open()
                 publish.ensure_repo(ws.manuscript)
-                hit = (api.Ctx(store=store, manuscript=ws.manuscript),
-                       threading.Lock())
-                self._entries[user_id] = hit
-            return hit
+                entry = [api.Ctx(store=store, manuscript=ws.manuscript),
+                         threading.Lock(), time.monotonic()]
+                self._entries[user_id] = entry
+            else:
+                entry[2] = time.monotonic()
+                self._entries.move_to_end(user_id)
+            self._reap()
+            return entry[0], entry[1]
+
+    def _reap(self) -> None:
+        """Caller holds the guard. Drops idle stores, then the oldest until
+        the cache is within budget. A busy entry is skipped rather than
+        waited on -- eviction is housekeeping and must not block a request."""
+        now = time.monotonic()
+        for uid in list(self._entries):
+            entry = self._entries[uid]
+            if now - entry[2] > self.idle_seconds:
+                self._drop(uid)
+        while len(self._entries) > self.max_open:
+            for uid in list(self._entries):        # oldest first
+                if self._drop(uid):
+                    break
+            else:
+                return                             # everything is in use
+
+    def _drop(self, user_id: str) -> bool:
+        entry = self._entries.get(user_id)
+        if entry is None:
+            return False
+        ctx, lock, _ = entry
+        if not lock.acquire(blocking=False):
+            return False                           # in flight; leave it
+        try:
+            ctx.store.close()                      # writes the closure back
+        except Exception:
+            pass
+        finally:
+            lock.release()
+        del self._entries[user_id]
+        self.evictions += 1
+        return True
 
     def close(self) -> None:
         with self._guard:
-            for ctx, _ in self._entries.values():
-                ctx.store.close()
+            for ctx, _lock, _seen in self._entries.values():
+                try:
+                    ctx.store.close()
+                except Exception:
+                    pass
             self._entries.clear()
 
     def __len__(self) -> int:
@@ -218,6 +273,7 @@ if auth_configured():
 @app.get("/healthz")
 def healthz() -> dict:
     return {"ok": True, "open_stores": len(registry),
+            "max_open": registry.max_open, "evictions": registry.evictions,
             "base_path": BASE_PATH, "single_user": SINGLE_USER,
             "auth": auth_configured()}
 

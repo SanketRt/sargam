@@ -19,8 +19,8 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import api
-import store as S
+from . import api
+from . import store as S
 
 _lock = threading.Lock()
 _ctx: api.Ctx | None = None

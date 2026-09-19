@@ -29,15 +29,15 @@ import os
 import pathlib
 import sys
 
-import ask as A
-import entities as E
-import extract
-import ground as G
-import publish
-import render as R
-import store as S
-import workspace as W
-from timeline import YEAR, fmt
+from . import ask as A
+from . import entities as E
+from . import extract
+from . import ground as G
+from . import publish
+from . import render as R
+from . import store as S
+from . import workspace as W
+from .timeline import YEAR, fmt
 
 
 def ws() -> W.Workspace:
@@ -389,12 +389,12 @@ def cmd_serve(args) -> None:
     os.environ.setdefault("SARGAM_HOME", str(home()))
     print(f"sargam on http://{args.host}:{args.port}"
           f"{os.environ.get('SARGAM_BASE_PATH', '')}   {dim('(ctrl-c to stop)')}")
-    uvicorn.run("server:app", host=args.host, port=args.port,
+    uvicorn.run("sargam.server:app", host=args.host, port=args.port,
                 log_level="warning")
 
 
 def cmd_web(args) -> None:
-    import web
+    from . import web
     web.serve(db_path(), manuscript(), port=args.port, open_browser=not args.no_open)
 
 

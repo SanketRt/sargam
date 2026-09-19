@@ -9,14 +9,19 @@ The properties worth guarding are not "does it produce a book" but:
   5. placement cost stays logarithmic in the anchor count
 """
 
+
 from __future__ import annotations
+
+import pathlib as _pathlib
+import sys as _sys
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 import random
 
 import numpy as np
 
-import placement as P
-from timeline import (INF, PROV_ABSOLUTE, PROV_STATED, YEAR, Inconsistent,
+from sargam import placement as P
+from sargam.timeline import (INF, PROV_ABSOLUTE, PROV_STATED, YEAR, Inconsistent,
                       Timeline, days)
 
 

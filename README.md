@@ -21,8 +21,8 @@ handlers under the server that gets deployed, and needs the hosted extras:
 No dependencies beyond `numpy`. The model is optional: without a credential
 everything still runs on a rule-based backend (see **Backends**).
 
-Put `sargam` on your PATH (`ln -s "$PWD/sargam" ~/.local/bin/sargam`), or call
-it as `python3 cli.py <command>` from this directory.
+Put the CLI on your PATH with `ln -s "$PWD/bin/sargam" ~/.local/bin/sargam`,
+or install the package with `pip install -e .`.
 
 Start putting real material in from the first day. Fragments are append-only
 and the store migrates itself, so nothing captured early is lost when the
@@ -30,32 +30,34 @@ schema downstream changes.
 
 ## What is here
 
-| file | what it does |
-|---|---|
-| `timeline.py` | STN: incremental all-pairs closure, bounds, provable ordering, atomic contradiction rejection |
-| `placement.py` | anchor salience, binary-search question generation, answer application |
-| `store.py` | SQLite persistence, point-index stability, in-place schema migration |
-| `extract.py` | text -> candidate events and constraints; api and offline backends |
-| `entities.py` | alias resolution, merges, referring expressions as questions |
-| `render.py` | chapter segmentation, paragraph compilation, the render cache |
-| `ground.py` | per-sentence anti-fabrication verdicts |
-| `publish.py` | markdown out, one git commit per compile |
-| `workspace.py` | per-user paths and the user-id check |
-| `accounts.py` | identity: who has an account, kept apart from their material |
-| `cli.py` | the command surface |
-| `api.py` | the review UI's handlers, with no transport in them |
-| `web.py` | local transport, standard library only |
-| `server.py` | hosted transport, FastAPI |
-| `schema.sql` | the store, including the paragraph build graph |
-| `demo.py` | runnable walkthrough, capture through to a committed manuscript |
-| `test_timeline.py`, `test_pipeline.py`, `test_workspace.py`, `test_server.py` | the properties worth guarding |
+```
+src/sargam/
+  timeline.py   STN: incremental all-pairs closure, provable ordering,
+                O(1) consistency check, atomic rejection
+  placement.py  anchor salience, binary-search question generation
+  store.py      SQLite persistence, point-index stability, schema migration,
+                solved-closure snapshot
+  workspace.py  per-user paths and the user-id check
+  accounts.py   identity, kept apart from anyone's material
+  extract.py    text -> candidate events and constraints; api + offline
+  entities.py   alias resolution, merges, referring expressions as questions
+  render.py     chapter segmentation, paragraph compilation, the render cache
+  ground.py     per-sentence anti-fabrication verdicts
+  publish.py    markdown out, one git commit per compile
+  ask.py        the human loop, wired to the store
+  api.py        review-UI handlers, with no transport in them
+  web.py        local transport, standard library only
+  server.py     hosted transport, FastAPI, accounts and eviction
+  cli.py        the command surface
+  schema.sql    the store, including the paragraph build graph
+bin/sargam      entry point, no install needed
+tests/          plain scripts: timeline, pipeline, workspace, server
+examples/demo.py
+```
 
 ```
-python demo.py
-python test_timeline.py
-python test_pipeline.py
-python test_workspace.py
-python test_server.py      # skips unless the hosted extras are installed
+python run_tests.py          every suite
+python examples/demo.py      capture -> solve -> ask -> compile -> commit
 ```
 
 ## Two transports, one product
@@ -89,6 +91,12 @@ any new shortest path must pass through the new edge and a single `i -> u ->
 v -> j` pass suffices: O(n²) per constraint instead of O(n³). Test 1 below
 exists solely to guard that equivalence.
 
+Nor does it check for a negative cycle afterwards. The closure already proves
+`x - y` lies in some interval, so a new assertion on that pair is satisfiable
+exactly when its interval meets the proven one — two comparisons, decided
+before anything is mutated. A contradiction therefore changes nothing because
+nothing was changed, not because a copy was restored.
+
 Placement never asks about an event, it asks about the loosest **pair**,
 against a pivot near the median of the unresolved anchors. Each answer
 propagates, so transitivity resolves pairs the search never has to ask about.
@@ -102,10 +110,10 @@ it was derived from, a `style_hash`, a content hash of its events, and a
 
 Reproducibility cannot come from `temperature=0`: current models removed the
 parameter and reject any request that sends it. So the render cache is not an
-optimisation, it is the correctness mechanism: a
-paragraph is regenerated only when its inputs actually changed, which is what
-makes `git diff` after a recompile mean *the model changed its mind* rather
-than *the model was sampled again*.
+optimisation, it is the correctness mechanism. A paragraph is regenerated only
+when its inputs actually changed, which is what makes `git diff` after a
+recompile mean *the model changed its mind* rather than *the model was sampled
+again*.
 
 Two details make it hold up:
 
@@ -142,7 +150,7 @@ sentences so you can see where the model reached.
 | `offline` | No network. Explicit dates and a few relative phrasings only; everything else goes to the unresolved queue. |
 
 Chosen automatically; force with `SARGAM_BACKEND=offline`. `--style` only
-affects the `api` backend -- the offline renderer has one voice.
+affects the `api` backend — the offline renderer has one voice.
 
 Every model entry point also takes an explicit `api_key`, so a caller can
 supply its own credential per call rather than relying on the process
@@ -202,6 +210,10 @@ is built to prevent.
 28. Logout expires the session cookie.
 29. The server refuses to serve accounts without a session secret.
 30. Account ids are derived, so a hostile subject cannot escape.
+31. Eviction caps open stores and loses nothing.
+32. A store with a request in flight is skipped, not closed.
+33. A restored closure is bit-identical to a replay.
+34. A snapshot that no longer matches its constraints is ignored.
 
 ## Hosting
 
@@ -217,6 +229,8 @@ the session is a signed cookie carrying nothing but an opaque account id.
 | `SARGAM_ACCOUNTS` | the accounts database (defaults beside `SARGAM_DATA`) |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth credentials |
 | `SARGAM_SINGLE` | run as one local user with no accounts |
+| `SARGAM_MAX_OPEN` | how many stores stay loaded (default 24) |
+| `SARGAM_IDLE_SECONDS` | close a store after this long unused (default 900) |
 
 The redirect URI registered with Google must be the **public** one, prefix
 included -- `SARGAM_PUBLIC_URL + SARGAM_BASE_PATH + /auth/callback`. The
@@ -231,17 +245,42 @@ Three things are deliberate rather than incidental:
 * **The session cookie is scoped to `SARGAM_BASE_PATH`**, not `/`. A domain
   hosting several proxied projects would otherwise send this session to all
   of them.
+* **Open stores are capped and evicted least-recently-used first.** A
+  Timeline is a dense matrix in memory, roughly 1 MB per hundred events, so how
+  many stay loaded is what decides the memory bill. Closing one writes its
+  solved closure back, which is why reopening is cheap. Eviction skips a store
+  with a request in flight rather than waiting on it.
 * **No Google tokens are stored.** Nothing calls Google again after
   identifying the person, so keeping them would be holding a credential for
   no reason.
 
+## Cost of the solver
+
+**Adding a constraint is O(n²), and used to be much worse.** Consistency is
+decided in O(1) before anything moves: the closure already proves `x - y` lies
+in some interval, and a new assertion holds exactly when its own interval
+meets that one. The previous scheme copied the whole distance matrix per
+constraint so a rejected assertion could be rolled back — at 1,500 events that
+is 72 MB per constraint, roughly 250 GB to build the network.
+
+**Reopening a store reads the solved closure rather than replaying it.**
+
+| events | build | open from snapshot | open by replay |
+|---|---|---|---|
+| 150 | 1.0 s | 6 ms | 109 ms |
+| 300 | 1.7 s | 6 ms | 690 ms |
+| 600 | 4.6 s | 20 ms | 6.7 s |
+
+The snapshot is fingerprinted over the live constraint rows, so a stale one is
+never adopted, and a test asserts it is bit-identical to a replay.
+
 ## Known limits
 
 * **The dense matrix has a ceiling.** `n` events means a `(2n+1)²` float64
-  matrix plus a copy per constraint added: about 32 MB at 1,000 events, 800 MB
-  at 5,000. Fine for a personal memoir, fatal past a few thousand events. The
-  fix, when it is needed, is a sparse or banded representation — the public
-  API would not change.
+  matrix: about 32 MB at 1,000 events, 800 MB at 5,000. Relaxation is O(m·n²),
+  so building a network of a few thousand events is slow even though each step
+  is cheap. Fine for a personal memoir. The fix, when it is needed, is a sparse
+  or banded representation — the public API would not change.
 * **Chapter segmentation cuts on temporal gaps only.** It does not know that
   two stretches of life belong together thematically.
 * **The offline renderer is plain by construction.** It states the events in

@@ -14,9 +14,9 @@ mentions per entity -- so entity questions go first when both are pending.
 
 from __future__ import annotations
 
-import placement as P
-import entities as E
-from timeline import INF, PROV_USER_PLACED, YEAR
+from . import placement as P
+from . import entities as E
+from .timeline import INF, PROV_USER_PLACED, YEAR
 
 
 def loosest(store, tolerance_days: float = 2 * YEAR) -> list[str]:

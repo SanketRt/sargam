@@ -14,7 +14,12 @@ that the transport cannot leak across the boundary the store establishes:
   5. the page knows the prefix it is served under
 """
 
+
 from __future__ import annotations
+
+import pathlib as _pathlib
+import sys as _sys
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 import os
 import pathlib
@@ -32,10 +37,10 @@ except ImportError:
 import base64
 import json
 
-import accounts as ACC
-import api
-import extract
-import workspace as W
+from sargam import accounts as ACC
+from sargam import api
+from sargam import extract
+from sargam import workspace as W
 
 SECRET = "test-secret-not-a-real-one"
 
@@ -73,7 +78,7 @@ def _fresh_server(root: pathlib.Path, **env):
     os.environ.pop("SARGAM_SINGLE", None)
     for k, v in env.items():
         os.environ[k] = v
-    import server as srv
+    from sargam import server as srv
     importlib.reload(srv)
     srv.registry.close()
     return srv
@@ -264,7 +269,7 @@ def test_accounts_refuse_a_default_secret() -> None:
             os.environ["SARGAM_ACCOUNTS"] = str(root / "accounts.db")
             os.environ.pop("SARGAM_SINGLE", None)
             import importlib
-            import server as srv
+            from sargam import server as srv
             try:
                 importlib.reload(srv)
             except RuntimeError as exc:
@@ -275,6 +280,62 @@ def test_accounts_refuse_a_default_secret() -> None:
         if saved is not None:
             os.environ["SARGAM_SECRET"] = saved
     print("ok  the server refuses to serve accounts without a session secret")
+
+
+def test_eviction_bounds_memory_and_preserves_state() -> None:
+    """Open stores are capped, and an evicted one comes back identical. If
+    eviction lost anything, the cap would be trading correctness for memory."""
+    with tmproot() as root:
+        srv = _fresh_server(root, SARGAM_MAX_OPEN="3")
+        srv.registry.max_open = 3
+        uids = [f"u{i:020d}" for i in range(8)]
+        for uid in uids:
+            ws = W.for_user(uid, root)
+            st = ws.open()
+            _seed(st, f"Something happened to {uid} in 19{70 + len(uid) % 20}.")
+            st.close()
+
+        srv.current_user = lambda request: "placeholder"
+        c = TestClient(srv.app)
+        seen = {}
+        for uid in uids:
+            srv.current_user = (lambda u: (lambda request: u))(uid)
+            seen[uid] = {e["summary"] for e in c.get("/api/state").json()["events"]}
+            assert len(srv.registry) <= 3, \
+                f"{len(srv.registry)} stores open, cap is 3"
+        assert srv.registry.evictions >= len(uids) - 3, srv.registry.evictions
+
+        # Re-visit the ones evicted first; state must be unchanged.
+        for uid in uids[:3]:
+            srv.current_user = (lambda u: (lambda request: u))(uid)
+            again = {e["summary"] for e in c.get("/api/state").json()["events"]}
+            assert again == seen[uid], f"{uid} lost state across eviction"
+        srv.registry.close()
+    print("ok  eviction caps open stores and loses nothing")
+
+
+def test_a_busy_store_is_not_evicted() -> None:
+    """Eviction closes a sqlite connection. Doing that to a request in flight
+    would fail it, so a held lock means skip, never wait."""
+    with tmproot() as root:
+        srv = _fresh_server(root)
+        srv.registry.max_open = 1
+        for uid in ("ubusy", "uother"):
+            W.for_user(uid, root).open().close()
+
+        ctx_busy, lock_busy = srv.registry.ctx("ubusy")
+        lock_busy.acquire()                    # pretend a request is running
+        try:
+            srv.registry.ctx("uother")         # triggers a reap
+            assert "ubusy" in srv.registry._entries, \
+                "an in-flight store was evicted"
+            # The connection must still be usable.
+            assert ctx_busy.store.tl is not None
+            ctx_busy.store.fragments()
+        finally:
+            lock_busy.release()
+        srv.registry.close()
+    print("ok  a store with a request in flight is skipped, not closed")
 
 
 def test_account_ids_are_derived_not_taken() -> None:
@@ -297,5 +358,7 @@ if __name__ == "__main__":
     test_a_forged_cookie_is_refused()
     test_logout_clears_the_session()
     test_accounts_refuse_a_default_secret()
+    test_eviction_bounds_memory_and_preserves_state()
+    test_a_busy_store_is_not_evicted()
     test_account_ids_are_derived_not_taken()
     print("\nall server properties hold")

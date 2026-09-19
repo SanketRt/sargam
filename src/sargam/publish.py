@@ -17,7 +17,7 @@ import pathlib
 import re
 import subprocess
 
-import ground as G
+from . import ground as G
 
 
 def slug(title: str) -> str:

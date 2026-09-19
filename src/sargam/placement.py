@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from timeline import PROV_USER_PLACED, YEAR, Event, Timeline, as_date
+from .timeline import PROV_USER_PLACED, YEAR, Event, Timeline, as_date
 
 # Answer kinds an option can carry.
 BEFORE, AFTER, DURING, COINCIDENT, UNSURE = (

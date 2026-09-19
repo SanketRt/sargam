@@ -13,7 +13,12 @@ multi-tenant server they are the whole security boundary:
   5. the key is never written to disk, and never becomes part of a cache key
 """
 
+
 from __future__ import annotations
+
+import pathlib as _pathlib
+import sys as _sys
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 import os
 import pathlib
@@ -22,10 +27,10 @@ import tempfile
 
 os.environ.setdefault("SARGAM_BACKEND", "offline")
 
-import extract
-import render as R
-import workspace as W
-from timeline import PROV_ABSOLUTE, days
+from sargam import extract
+from sargam import render as R
+from sargam import workspace as W
+from sargam.timeline import PROV_ABSOLUTE, days
 
 FAKE_KEY = "sk-ant-thiskeymustneverbewrittentodisk"
 

@@ -3,10 +3,15 @@ End-to-end walkthrough with a hand-written extraction, so you can see the loop
 before any model is wired in. Run: python demo.py
 """
 
+
 from __future__ import annotations
 
-import placement as P
-from timeline import (PROV_ABSOLUTE, PROV_STATED, YEAR, Inconsistent, Timeline,
+import pathlib as _pathlib
+import sys as _sys
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1] / "src"))
+
+from sargam import placement as P
+from sargam.timeline import (PROV_ABSOLUTE, PROV_STATED, YEAR, Inconsistent, Timeline,
                       days, fmt)
 
 tl = Timeline()
@@ -92,9 +97,9 @@ import pathlib
 import shutil
 import tempfile
 
-import publish
-import render as R
-import store as S
+from sargam import publish
+from sargam import render as R
+from sargam import store as S
 
 work = pathlib.Path(tempfile.mkdtemp(prefix="sargam-demo-"))
 st = S.Store(work / "store.db")

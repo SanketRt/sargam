@@ -19,7 +19,7 @@ import pathlib
 import re
 from dataclasses import dataclass
 
-import store as S
+from . import store as S
 
 # A user id becomes a directory name, so it is checked rather than trusted.
 # Opaque ids only: no dots, no separators, nothing that can climb out of the

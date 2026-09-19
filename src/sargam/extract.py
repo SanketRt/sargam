@@ -23,7 +23,7 @@ import json
 import os
 import re
 
-from timeline import PROV_ABSOLUTE, PROV_STATED, YEAR
+from .timeline import PROV_ABSOLUTE, PROV_STATED, YEAR
 
 MODEL = os.environ.get("SARGAM_MODEL", "claude-opus-5")
 
@@ -392,7 +392,7 @@ def apply(store, out: dict, fragment_id: str) -> dict:
 
 
 def _absolute(store, eid, lo, hi, src) -> bool:
-    from timeline import days
+    from .timeline import days
     ev = store.tl.events[eid]
     a, _ = store.assert_constraint(ev.s, 0, days(lo), days(hi),
                                    PROV_ABSOLUTE, src, "stated date")
@@ -409,7 +409,7 @@ def _gap(store, a_id, b_id, lo_y, hi_y, src) -> bool:
 
 
 def _before(store, a_id, b_id, src) -> bool:
-    from timeline import INF
+    from .timeline import INF
     A, B = store.tl.events[a_id], store.tl.events[b_id]
     ok, _ = store.assert_constraint(B.s, A.e, 1.0, INF,
                                     PROV_STATED, src, "stated order")
@@ -417,7 +417,7 @@ def _before(store, a_id, b_id, src) -> bool:
 
 
 def _during(store, a_id, b_id, src) -> bool:
-    from timeline import INF
+    from .timeline import INF
     A, B = store.tl.events[a_id], store.tl.events[b_id]
     ok1, _ = store.assert_constraint(A.s, B.s, 0.0, INF,
                                      PROV_STATED, src, "stated containment")
