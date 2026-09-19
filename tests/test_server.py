@@ -175,10 +175,10 @@ def test_page_knows_its_prefix() -> None:
 
 
 def test_the_page_matches_the_site_it_is_served_from() -> None:
-    """Served under sanketr.com, this shares an origin with the portfolio --
-    and therefore its localStorage. Reading the same `theme` key is what makes
-    the theme follow someone across, so the key name is a contract, not a
-    detail. The pre-paint script is what stops the wrong theme flashing first."""
+    """Proxied under the host site, this shares an origin with it -- and
+    therefore its localStorage. Reading the same `theme` key is what makes the
+    theme follow someone across, so the key name is a contract, not a detail.
+    The pre-paint script is what stops the wrong theme flashing first."""
     p = api.page("/projects/sargam")
 
     head = p[:p.index("</head>")]

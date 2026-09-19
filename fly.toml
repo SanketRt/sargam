@@ -4,6 +4,10 @@
 # registry of open stores lives in that process -- a second machine would hold
 # its own copy of the same user's constraint network and the two would
 # overwrite each other. Scale this up only after the store moves off SQLite.
+#
+# Anything that identifies a particular deployment -- the public domain, the
+# path it is proxied under, OAuth credentials -- is set with `fly secrets set`
+# rather than committed here. See deploy/fly.env.example.
 
 app = "sargam"
 primary_region = "bom"
@@ -13,11 +17,6 @@ primary_region = "bom"
 [env]
   SARGAM_DATA = "/data/users"
   SARGAM_ACCOUNTS = "/data/accounts.db"
-  # What the browser sees. Netlify proxies sanketr.com/projects/sargam here,
-  # and the app never receives that prefix -- it needs it to build page URLs,
-  # to scope the session cookie, and to form the OAuth redirect URI.
-  SARGAM_BASE_PATH = "/projects/sargam"
-  SARGAM_PUBLIC_URL = "https://sanketr.com"
   PORT = "8080"
 
 [http_service]

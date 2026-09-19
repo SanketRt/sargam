@@ -3,3 +3,6 @@ __pycache__/
 .sargam/
 
 .venv/
+
+# deployment-specific values, never committed
+deploy/fly.env

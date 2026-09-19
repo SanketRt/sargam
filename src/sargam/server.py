@@ -255,8 +255,8 @@ app.add_middleware(
     same_site="lax",          # the OAuth redirect is a cross-site GET back
     https_only=PUBLIC_URL.startswith("https://"),
     max_age=30 * 24 * 3600,
-    # Scoped to this app's own prefix. sanketr.com hosts several proxied
-    # projects; a cookie on "/" would be sent to all of them, which is a
+    # Scoped to this app's own prefix. A domain that hosts several proxied
+    # projects would otherwise send this cookie to all of them, which is a
     # session handed to code that has no business seeing it.
     path=BASE_PATH or "/",
 )

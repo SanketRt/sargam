@@ -173,13 +173,13 @@ def page(base: str = "") -> str:
     return PAGE.replace("<script>", inject + "\n<script>", 1)
 
 
-# Visual language taken from sanketr.com: Inter, a strictly neutral palette,
-# 14px radii, a translucent sticky header. It reads as part of the site rather
-# than an app bolted onto it.
+# Visual language taken from the site this is proxied from: Inter, a strictly
+# neutral palette, 14px radii, a translucent sticky header. It reads as part of
+# that site rather than an app bolted onto it.
 #
-# The theme is stored under the same `theme` key the portfolio uses. Served
-# from the same origin, that means whichever theme someone picked on the
-# portfolio is the one this opens in, and a change here follows them back.
+# The theme is stored under the same `theme` key the host site uses. Served
+# from the same origin, that means whichever theme someone picked there is the
+# one this opens in, and a change here follows them back.
 #
 # The palette is monochrome by design, which leaves no colour spare for
 # meaning -- so the three grounding verdicts get the only hues on the page,

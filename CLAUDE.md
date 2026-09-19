@@ -92,7 +92,7 @@ ciphertext being lifted from one row into another. Only a four-character hint
 is ever readable back, and a key is validated before it is stored. Never log
 it, never return it, never put it in a cache key.
 
-**The UI is sanketr.com's design system, not its own.** Tokens, typeface
+**The UI is the host site's design system, not its own.** Tokens, typeface
 and radii are copied from that site's stylesheet; if you change a colour here,
 change it there or the two drift apart. The theme is stored under the same
 `theme` localStorage key, on the same origin, so it carries across — renaming
@@ -130,7 +130,7 @@ Local tool is complete and usable. Hosting is partway:
 - done: per-request API keys, per-user workspaces, FastAPI transport,
   Google sign-in, LRU + idle eviction, solver snapshot, sealed bring-your-own-
   key storage
-- done: the UI in sanketr.com's design system; Dockerfile, entrypoint and
+- done: the UI in the host site's design system; Dockerfile, entrypoint and
   fly.toml, all verified by building and running the image locally
 - next: `fly deploy` (needs flyctl and Google OAuth credentials), the Netlify
   `_redirects` line, then rate limits, data export and account delete

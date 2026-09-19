@@ -236,7 +236,7 @@ the session is a signed cookie carrying nothing but an opaque account id.
 | variable | meaning |
 |---|---|
 | `SARGAM_SECRET` | session signing key. **Required** -- the server refuses to serve accounts without it rather than pick a default. |
-| `SARGAM_PUBLIC_URL` | the address the browser uses, e.g. `https://sanketr.com` |
+| `SARGAM_PUBLIC_URL` | the address the browser uses, e.g. `https://example.com` |
 | `SARGAM_BASE_PATH` | the prefix the proxy keeps, e.g. `/projects/sargam` |
 | `SARGAM_DATA` | where per-user workspaces live |
 | `SARGAM_ACCOUNTS` | the accounts database (defaults beside `SARGAM_DATA`) |
@@ -290,9 +290,10 @@ never adopted, and a test asserts it is bit-identical to a replay.
 
 ## Look
 
-The interface uses sanketr.com's visual language rather than its own: Inter,
-the same neutral palette and token names, 14px radii, a translucent sticky
-header. Every colour value is taken from the site's stylesheet unchanged. Two
+The interface borrows the visual language of the site it is proxied from
+rather than inventing its own: the same typeface, neutral palette and token
+names, radii and translucent sticky header, with every colour value taken from
+that site's stylesheet unchanged. Two
 things differ on purpose — the content column is wider, because a two-pane
 app is not a reading column, and the three grounding verdicts get the only
 hues on the page, kept low-chroma so they read as annotation.
@@ -334,29 +335,38 @@ Each worker would keep its own registry of open stores, and two of them
 writing the same user's SQLite file is corruption waiting to happen.
 Concurrency here is per-user locks inside a single process.
 
-```
-fly launch --no-deploy                  # uses the committed fly.toml
-fly volumes create sargam_data --size 1 --region bom
-
-fly secrets set \
-  SARGAM_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" \
-  SARGAM_KEY_SECRET="$(python -c 'from sargam import vault;print(vault.generate())')" \
-  GOOGLE_CLIENT_ID=... \
-  GOOGLE_CLIENT_SECRET=...
-
-fly deploy
-```
-
-Then proxy it from the site. In Netlify's `_redirects`:
+Nothing that identifies a particular deployment lives in this repository.
+`fly.toml` carries only the shape of the machine; the domain, the path prefix
+and every credential are set as secrets. Copy `deploy/fly.env.example` to
+`deploy/fly.env` (git-ignored), fill it in, then:
 
 ```
-/projects/sargam/*   https://sargam.fly.dev/:splat   200!
+flyctl launch --no-deploy
+flyctl volumes create sargam_data --size 1
+
+set -a; . deploy/fly.env; set +a
+flyctl secrets set \
+  SARGAM_PUBLIC_URL="$SARGAM_PUBLIC_URL" \
+  SARGAM_BASE_PATH="$SARGAM_BASE_PATH" \
+  SARGAM_SECRET="$SARGAM_SECRET" \
+  SARGAM_KEY_SECRET="$SARGAM_KEY_SECRET" \
+  GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
+  GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
+
+flyctl deploy
 ```
 
-and register this exact redirect URI with Google:
+To serve it under a path on an existing site, proxy it there. With Netlify,
+in `_redirects`:
 
 ```
-https://sanketr.com/projects/sargam/auth/callback
+/projects/sargam/*   https://<your-app>.fly.dev/:splat   200!
+```
+
+and register this redirect URI with Google, exactly:
+
+```
+https://<your-domain>/projects/sargam/auth/callback
 ```
 
 `SARGAM_BASE_PATH` is what the browser sees, not what the app receives. It is
