@@ -28,8 +28,16 @@ from timeline import PROV_ABSOLUTE, PROV_STATED, YEAR
 MODEL = os.environ.get("SARGAM_MODEL", "claude-opus-5")
 
 
-def backend() -> str:
+def backend(api_key: str | None = None) -> str:
+    """Which path a call will take. `api_key` is the caller's own credential --
+    in a hosted, multi-tenant setting the key arrives per request rather than
+    from the process environment, and a user who supplied one is on the api
+    path regardless of how the server itself is configured."""
     b = os.environ.get("SARGAM_BACKEND")
+    if b == "offline":
+        return b
+    if api_key:
+        return "api"
     if b:
         return b
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
@@ -136,15 +144,17 @@ GROUND_SCHEMA = {
 }
 
 
-def _client():
+def _client(api_key: str | None = None):
     import anthropic
+    if api_key:
+        return anthropic.Anthropic(api_key=api_key)
     # Zero-arg: resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an
     # `ant auth login` profile, in that order.
     return anthropic.Anthropic()
 
 
 def json_call(system: str, user: str, schema: dict,
-              max_tokens: int = 16000) -> dict:
+              max_tokens: int = 16000, api_key: str | None = None) -> dict:
     """One structured call. `output_config.format` guarantees the response
     parses, so there is no fence-stripping and no retry-on-bad-JSON path.
 
@@ -152,7 +162,7 @@ def json_call(system: str, user: str, schema: dict,
     sending it is a 400. Determinism for rendering comes from the render
     cache in render.py, not from sampling settings.
     """
-    r = _client().messages.create(
+    r = _client(api_key).messages.create(
         model=MODEL,
         max_tokens=max_tokens,
         system=system,
@@ -168,16 +178,17 @@ def json_call(system: str, user: str, schema: dict,
 
 # --------------------------------------------------------------- extraction
 
-def extract(fragment_body: str, known_events: dict[str, str]) -> dict:
+def extract(fragment_body: str, known_events: dict[str, str],
+            api_key: str | None = None) -> dict:
     """known_events maps existing event id -> summary, so the model can attach
     new material to what is already there instead of duplicating it."""
-    if backend() == "offline":
+    if backend(api_key) == "offline":
         return offline_extract(fragment_body, known_events)
     catalogue = "\n".join(f"- {k}: {v}" for k, v in known_events.items())
     return json_call(
         EXTRACT_SYSTEM,
         f"Existing events:\n{catalogue or '(none)'}\n\nText:\n{fragment_body}",
-        EXTRACT_SCHEMA,
+        EXTRACT_SCHEMA, api_key=api_key,
     )
 
 
@@ -316,6 +327,16 @@ def _c(kind: str, **kw) -> dict:
 
 # ------------------------------------------------------------------- landing
 
+def validate_key(api_key: str) -> tuple[bool, str]:
+    """Cheap check that a pasted key works, so a bad one fails at paste time
+    rather than half way through a compile. Never echo the key back."""
+    try:
+        _client(api_key).models.list(limit=1)
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    return True, "ok"
+
+
 def apply(store, out: dict, fragment_id: str) -> dict:
     """Land an extraction into the network *and* the store. Inconsistent
     constraints are recorded as conflicts rather than forced in.
@@ -407,14 +428,15 @@ def _during(store, a_id, b_id, src) -> bool:
 
 # ------------------------------------------------------------------ grounding
 
-def ground(paragraph: str, sources: dict[str, str]) -> dict:
+def ground(paragraph: str, sources: dict[str, str],
+           api_key: str | None = None) -> dict:
     """Run on every rendered paragraph before it is written to the manuscript.
     Strip `unsupported` sentences; mark `inferred` ones in the UI."""
-    if backend() == "offline":
+    if backend(api_key) == "offline":
         return offline_ground(paragraph, sources)
     src = "\n\n".join(f"[{k}] {v}" for k, v in sources.items())
     return json_call(GROUND_SYSTEM, f"Sources:\n{src}\n\nProse:\n{paragraph}",
-                     GROUND_SCHEMA, max_tokens=4000)
+                     GROUND_SCHEMA, max_tokens=4000, api_key=api_key)
 
 
 def sentences_of(paragraph: str) -> list[str]:

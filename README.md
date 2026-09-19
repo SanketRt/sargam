@@ -36,16 +36,18 @@ schema downstream changes.
 | `render.py` | chapter segmentation, paragraph compilation, the render cache |
 | `ground.py` | per-sentence anti-fabrication verdicts |
 | `publish.py` | markdown out, one git commit per compile |
+| `workspace.py` | per-user paths and the user-id check |
 | `cli.py` | the command surface |
 | `web.py` | review UI, standard library only |
 | `schema.sql` | the store, including the paragraph build graph |
 | `demo.py` | runnable walkthrough, capture through to a committed manuscript |
-| `test_timeline.py`, `test_pipeline.py` | the properties worth guarding |
+| `test_timeline.py`, `test_pipeline.py`, `test_workspace.py` | the properties worth guarding |
 
 ```
 python demo.py
 python test_timeline.py
 python test_pipeline.py
+python test_workspace.py
 ```
 
 ## How it works
@@ -117,6 +119,11 @@ sentences so you can see where the model reached.
 Chosen automatically; force with `SARGAM_BACKEND=offline`. `--style` only
 affects the `api` backend -- the offline renderer has one voice.
 
+Every model entry point also takes an explicit `api_key`, so a caller can
+supply its own credential per call rather than relying on the process
+environment. `SARGAM_BACKEND=offline` still overrides it, which is what makes
+a deployment able to guarantee no outbound calls.
+
 The offline extractor is deliberately narrow, and it refuses to guess. Given
 *"the flood came one year later than the wedding"* it will not anchor that to
 the previous sentence — it cannot resolve which event "the wedding" is, so the
@@ -149,6 +156,14 @@ is built to prevent.
 13. Merging two entities loses no event link.
 14. An undated event renders into a holding section, last.
 15. The cache key tracks meaning, not bound jitter.
+
+`test_workspace.py` — per-user isolation and per-request credentials:
+
+16. A user id can never address a directory outside the data root.
+17. One user's store cannot read another's.
+18. The backend follows the caller's own credential; the deployment can veto.
+19. The key reaches every model call site.
+20. The key is never written to disk and never enters a cache key.
 
 ## Known limits
 

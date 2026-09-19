@@ -250,7 +250,7 @@ def offline_paragraph(tl, event_ids: list[str], sources: dict[str, str]) -> str:
 
 
 def api_paragraph(tl, event_ids: list[str], sources: dict[str, str],
-                  style: str) -> str:
+                  style: str, api_key: str | None = None) -> str:
     import extract
     lines = []
     for eid in event_ids:
@@ -262,7 +262,7 @@ def api_paragraph(tl, event_ids: list[str], sources: dict[str, str],
     user = (f"Style: {STYLES[style]}\n\n"
             f"Events, in solved order:\n" + "\n".join(lines) +
             f"\n\nThe user's own words (the only permitted source of fact):\n{src}")
-    r = extract._client().messages.create(
+    r = extract._client(api_key).messages.create(
         model=extract.MODEL,
         max_tokens=2000,
         system=RENDER_SYSTEM,
@@ -273,8 +273,15 @@ def api_paragraph(tl, event_ids: list[str], sources: dict[str, str],
     return "".join(b.text for b in r.content if b.type == "text").strip()
 
 
-def write_paragraph(store, event_ids: list[str], style: str) -> tuple[str, bool]:
-    """Returns (body, from_cache)."""
+def write_paragraph(store, event_ids: list[str], style: str,
+                    api_key: str | None = None) -> tuple[str, bool]:
+    """Returns (body, from_cache).
+
+    The cache key deliberately does not include the api key: two users with
+    the same events and the same style should get the same paragraph, and
+    keying on the credential would both leak it into the key space and make
+    the cache useless in a multi-tenant store.
+    """
     import extract
     tl = store.tl
     key = _h(event_set_hash(tl, event_ids) + style_hash(style))
@@ -282,11 +289,11 @@ def write_paragraph(store, event_ids: list[str], style: str) -> tuple[str, bool]
     if hit is not None:
         return hit, True
     sources = sources_for(store, event_ids)
-    if extract.backend() == "offline":
+    if extract.backend(api_key) == "offline":
         body = offline_paragraph(tl, event_ids, sources)
         model = "offline"
     else:
-        body = api_paragraph(tl, event_ids, sources, style)
+        body = api_paragraph(tl, event_ids, sources, style, api_key=api_key)
         model = extract.MODEL
     store.put_render(key, body, model)
     return body, False
@@ -294,7 +301,8 @@ def write_paragraph(store, event_ids: list[str], style: str) -> tuple[str, bool]
 
 # -------------------------------------------------------------------- compile
 
-def compile_book(store, style: str = "plain", do_ground: bool = True) -> dict:
+def compile_book(store, style: str = "plain", do_ground: bool = True,
+                 api_key: str | None = None) -> dict:
     """Recompile every chapter. Frozen paragraphs whose sources moved are
     flagged and left exactly as they are."""
     import ground as G
@@ -331,13 +339,15 @@ def compile_book(store, style: str = "plain", do_ground: bool = True) -> dict:
                               "frozen": True, "flagged": bool(stale)})
                 continue
 
-            body, from_cache = write_paragraph(store, run, style)
+            body, from_cache = write_paragraph(store, run, style,
+                                               api_key=api_key)
             cached += from_cache
             rendered += not from_cache
             store.upsert_paragraph(pid, title, float(ordinal), body, run, sh,
                                    event_hash=eh, frozen=False, dirty=False)
             if do_ground and not from_cache:
-                G.check(store, pid, body, sources_for(store, run))
+                G.check(store, pid, body, sources_for(store, run),
+                        api_key=api_key)
             paras.append({"id": pid, "body": body, "derived_from": run,
                           "frozen": False, "flagged": False})
         book.append({"title": title, "paragraphs": paras, "events": chap})

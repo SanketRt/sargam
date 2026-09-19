@@ -35,25 +35,33 @@ import ground as G
 import publish
 import render as R
 import store as S
+import workspace as W
 from timeline import YEAR, fmt
 
 
+def ws() -> W.Workspace:
+    """The local single-user workspace. The hosted server resolves a
+    Workspace per account through the same module."""
+    return W.local()
+
+
 def home() -> pathlib.Path:
-    return pathlib.Path(os.environ.get("SARGAM_HOME", ".sargam")).resolve()
+    return ws().root
 
 
 def db_path() -> pathlib.Path:
-    return home() / "store.db"
+    return ws().db_path
 
 
 def manuscript() -> pathlib.Path:
-    return home() / "manuscript"
+    return ws().manuscript
 
 
 def open_store() -> S.Store:
-    if not db_path().exists():
-        sys.exit(f"no sargam project at {home()}. Run: sargam init")
-    return S.Store(db_path())
+    w = ws()
+    if not w.exists():
+        sys.exit(f"no sargam project at {w.root}. Run: sargam init")
+    return w.open()
 
 
 def c(text: str, code: str) -> str:
@@ -70,10 +78,8 @@ red = lambda s: c(s, "31")
 # ------------------------------------------------------------------ commands
 
 def cmd_init(args) -> None:
-    home().mkdir(parents=True, exist_ok=True)
-    st = S.Store(db_path())
-    st.close()
-    publish.ensure_repo(manuscript())
+    w = ws().create()
+    publish.ensure_repo(w.manuscript)
     print(f"{green('initialised')} {home()}")
     print(f"  store       {db_path()}")
     print(f"  manuscript  {manuscript()} (git repo)")

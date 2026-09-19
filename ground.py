@@ -23,11 +23,11 @@ INFERRED = "inferred"
 UNSUPPORTED = "unsupported"
 
 
-def check(store, paragraph_id: str, body: str,
-          sources: dict[str, str]) -> list[dict]:
+def check(store, paragraph_id: str, body: str, sources: dict[str, str],
+          api_key: str | None = None) -> list[dict]:
     """Ground one paragraph and persist the verdicts."""
     try:
-        out = extract.ground(body, sources)
+        out = extract.ground(body, sources, api_key=api_key)
     except Exception as exc:                     # network, auth, refusal
         print(f"  grounding skipped for {paragraph_id}: {exc}")
         return []
