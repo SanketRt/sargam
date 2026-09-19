@@ -63,6 +63,35 @@ def test_the_script_parses() -> None:
     print(f"ok  every script block parses ({len(scripts(page))} checked)")
 
 
+def test_sign_in_errors_are_reported_in_both_auth_states() -> None:
+    """A refused sign-in redirects back with ?error=. If that is only read on
+    the signed-out path, then anyone who already holds a session for a
+    different account sees nothing at all -- the sign-in silently does
+    nothing. The parameter has to be read before the auth state is known."""
+    page = api.page("/sargam")
+    main = max(scripts(page), key=len)
+
+    assert "function takeError()" in main, "no place reads the error parameter"
+    assert "signedOut(err)" in main, "the signed-out path is not told the error"
+    assert "showNotice(err)" in main, "the signed-in path never shows the error"
+
+    body = main[main.index("async function load("):]
+    body = body[:body.index("\nfunction ") if "\nfunction " in body else len(body)]
+    assert body.index("takeError()") < body.index("await fetch"), \
+        "the error is read after an await, so a redirect can be lost"
+
+    # signedOut must not go looking for it itself; it is handed the message.
+    so = main[main.index("function signedOut("):]
+    so = so[:so.index("\nfunction ")] if "\nfunction " in so else so
+    assert "URLSearchParams" not in so, \
+        "signedOut still reads the URL, re-coupling errors to being logged out"
+
+    assert 'id="notice"' in page, "no element to render the message into"
+    assert "history.replaceState" in main, \
+        "the parameter is never cleared, so a refresh repeats the message"
+    print("ok  a refused sign-in is reported whether or not a session exists")
+
+
 def test_the_page_is_structurally_sound() -> None:
     page = api.page("/sargam")
     for tag in ("html", "head", "body", "header", "main", "style", "script"):
@@ -91,6 +120,7 @@ def test_every_handler_the_page_calls_is_routed() -> None:
 if __name__ == "__main__":
     test_no_literal_newline_inside_a_js_string()
     test_the_script_parses()
+    test_sign_in_errors_are_reported_in_both_auth_states()
     test_the_page_is_structurally_sound()
     test_every_handler_the_page_calls_is_routed()
     print("\nall page properties hold")

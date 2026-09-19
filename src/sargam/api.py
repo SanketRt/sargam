@@ -393,6 +393,11 @@ textarea#capture:disabled{opacity:.6}
  flex-wrap:wrap}
 .capture-row .note{color:var(--muted);font-size:.78rem;flex:1;min-width:12rem;
  margin:0;line-height:1.5}
+.notice{border:1px solid var(--warn);border-radius:var(--radius);
+ padding:.8rem 1.05rem;margin-bottom:1.25rem;font-size:.85rem;
+ background:var(--warn-soft);display:flex;gap:.7rem;align-items:center}
+.notice .close{margin-left:auto;cursor:pointer;color:var(--muted);
+ background:none;border:0;font:inherit;font-size:1.1rem;line-height:1;padding:0}
 .empty{color:var(--muted);font-size:.85rem}
 .signin{text-align:center;padding:3rem 1rem;max-width:26rem;margin:0 auto}
 .signin h3{font-size:1.15rem;font-weight:600;margin-bottom:.6rem;letter-spacing:-.01em}
@@ -437,6 +442,7 @@ textarea#capture:disabled{opacity:.6}
     <div id="timeline"></div>
   </section>
   <div style="min-width:0">
+    <div id="notice"></div>
     <section class="card" style="margin-bottom:1.25rem">
       <div class="section-head"><svg class="icon"><use href="#i-pen"/></svg>
         <h2>Add a memory</h2></div>
@@ -484,21 +490,42 @@ async function postStatus(path,body){
  let j={}; try{j=await r.json();}catch(e){}
  return {status:r.status, body:j};}
 
-async function load(){
+const ERRORS={
+ closed:'That account is not on the list for this site, so it was not signed in.',
+ unverified:'That Google account has no verified email address.',
+ signin:'Sign-in did not complete. Please try again.'
+};
+function takeError(){
+ const p=new URLSearchParams(location.search), err=p.get('error');
+ if(!err) return null;
+ // Cleared from the address bar so a refresh does not repeat the message.
+ p.delete('error');
+ const q=p.toString();
+ history.replaceState({},'',location.pathname+(q?'?'+q:''));
+ return ERRORS[err]||ERRORS.signin;
+}
+function showNotice(msg){
+ const n=document.getElementById('notice');
+ if(!n) return;
+ if(!msg){n.innerHTML='';return;}
+ n.innerHTML=`<div class="notice"><span>${esc(msg)}</span>
+   <button class="close" onclick="showNotice(null)" aria-label="Dismiss">&times;</button></div>`;
+}
+async function load(quiet){
+ // Read before anything awaits: a refused sign-in has to be reported whether
+ // or not the browser still holds a valid session for a different account.
+ const err=quiet?null:takeError();
  const r=await fetch(BASE+'/api/state');
- if(r.status===401){signedOut();return;}
+ if(r.status===401){signedOut(err);return;}
  S=await r.json();
  try{ME=await(await fetch(BASE+'/api/me')).json();}catch(e){ME=null;}
  draw();
+ showNotice(err);
 }
 
-function signedOut(){
- const p=new URLSearchParams(location.search), err=p.get('error');
- const msg=err==='unverified'
-   ? 'That Google account has no verified email address.'
-   : err==='closed'
-   ? 'This is not open to new accounts yet.'
-   : err ? 'Sign-in did not complete. Please try again.' : '';
+function signedOut(msg){
+ msg=msg||'';
+ document.getElementById('notice').innerHTML='';
  document.getElementById('stats').textContent='';
  document.getElementById('who').innerHTML='';
  document.getElementById('question').innerHTML='';
@@ -604,30 +631,30 @@ async function capture(){
  if(r.ok){el.value='';}
  toast(r.message||'added');
  if(r.ok&&r.needs_placement){toast(r.message+' \u2014 '+r.needs_placement+' to place');}
- await load();
+ await load(true);
  el.focus();
 }
 async function answer(i){const q=S.question;
  const r=await post('/api/answer',{event_id:q.event_id,prompt:q.prompt,
-  options:q.options,choice:i});toast(r.message||'recorded');await load();}
+  options:q.options,choice:i});toast(r.message||'recorded');await load(true);}
 async function bind(i){const q=S.question,o=q.options[i];
  let name=null;
  if(o.entity_id===null){name=prompt('Name?');if(!name)return;}
  await post('/api/entity',{unresolved_id:q.unresolved_id,entity_id:o.entity_id,
-  new_name:name});toast('bound');await load();}
+  new_name:name});toast('bound');await load(true);}
 async function freeze(id,f){await post('/api/freeze',{paragraph_id:id,frozen:f});
- toast(f?'frozen':'unfrozen');await load();}
+ toast(f?'frozen':'unfrozen');await load(true);}
 async function saveKey(){
  const el=document.getElementById('apikey'), key=(el.value||'').trim();
  if(!key){toast('paste a key first');return;}
  el.value=''; toast('checking\\u2026');
  const r=await postStatus('/api/key',{api_key:key});
  toast(r.status===200?'key saved':(r.body.detail||'could not save that key'));
- await load();}
+ await load(true);}
 async function clearKey(){await postStatus('/api/key/clear',{});
- toast('key removed'); await load();}
+ toast('key removed'); await load(true);}
 async function compile(){toast('compiling\\u2026');const r=await post('/api/compile',{});
  toast(r.commit?`${r.rendered} rendered, ${r.cached} cached`
-   :`${r.cached} cached \\u2014 no change`);await load();}
+   :`${r.cached} cached \\u2014 no change`);await load(true);}
 load();
 </script></body></html>"""
