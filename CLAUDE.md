@@ -89,6 +89,13 @@ ciphertext being lifted from one row into another. Only a four-character hint
 is ever readable back, and a key is validated before it is stored. Never log
 it, never return it, never put it in a cache key.
 
+**The UI is sanketr.com's design system, not its own.** Tokens, typeface
+and radii are copied from that site's stylesheet; if you change a colour here,
+change it there or the two drift apart. The theme is stored under the same
+`theme` localStorage key, on the same origin, so it carries across — renaming
+the key silently breaks that. The palette is monochrome, which leaves the only
+hues on the page for the three grounding verdicts.
+
 **Multi-tenancy is physical.** One SQLite file per user, ids derived
 (never taken) from Google's subject so they satisfy `SAFE_ID` by construction.
 The **only** thing that may name a workspace is the signed session cookie —

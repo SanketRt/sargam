@@ -174,6 +174,31 @@ def test_page_knows_its_prefix() -> None:
     print("ok  the page builds every URL from the prefix it was served under")
 
 
+def test_the_page_matches_the_site_it_is_served_from() -> None:
+    """Served under sanketr.com, this shares an origin with the portfolio --
+    and therefore its localStorage. Reading the same `theme` key is what makes
+    the theme follow someone across, so the key name is a contract, not a
+    detail. The pre-paint script is what stops the wrong theme flashing first."""
+    p = api.page("/projects/sargam")
+
+    head = p[:p.index("</head>")]
+    assert "localStorage.getItem('theme')" in head, \
+        "theme is not read before first paint"
+    assert "setAttribute('data-theme'" in head, "theme is not applied in <head>"
+    assert "localStorage.setItem('theme'" in p, "the toggle does not persist"
+    assert 'data-theme="light"' in p, "no default theme on the root element"
+    assert '[data-theme="dark"]' in p, "no dark palette"
+
+    assert "family=Inter" in p, "not using the site's typeface"
+    assert "prefers-color-scheme: dark" in head, \
+        "a first-time visitor's system preference is ignored"
+
+    # Every URL the page builds must go through BASE.
+    for absolute in ("fetch('/api/", 'fetch("/api/', 'href="/auth/'):
+        assert absolute not in p, f"absolute URL survived: {absolute}"
+    print("ok  the page shares the site's theme, typeface and path prefix")
+
+
 def test_the_session_cookie_decides_the_workspace() -> None:
     """The only thing that may name a workspace is the signed cookie. A
     header, a query parameter or a body field naming another user must do
@@ -415,6 +440,7 @@ if __name__ == "__main__":
     test_unauthenticated_gets_nothing()
     test_failures_do_not_leak_internals()
     test_page_knows_its_prefix()
+    test_the_page_matches_the_site_it_is_served_from()
     test_the_session_cookie_decides_the_workspace()
     test_a_forged_cookie_is_refused()
     test_logout_clears_the_session()

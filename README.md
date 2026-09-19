@@ -226,6 +226,7 @@ is built to prevent.
 40. Clearing a credential leaves no hint and no ciphertext.
 41. An accounts database predating credentials migrates in place.
 42. A stored credential reaches its owner alone and is never readable.
+43. The page shares the site's theme, typeface and path prefix.
 
 ## Hosting
 
@@ -286,6 +287,20 @@ is 72 MB per constraint, roughly 250 GB to build the network.
 
 The snapshot is fingerprinted over the live constraint rows, so a stale one is
 never adopted, and a test asserts it is bit-identical to a replay.
+
+## Look
+
+The interface uses sanketr.com's visual language rather than its own: Inter,
+the same neutral palette and token names, 14px radii, a translucent sticky
+header. Every colour value is taken from the site's stylesheet unchanged. Two
+things differ on purpose — the content column is wider, because a two-pane
+app is not a reading column, and the three grounding verdicts get the only
+hues on the page, kept low-chroma so they read as annotation.
+
+The theme lives under the same `theme` key in `localStorage`. Served from the
+same origin, that means whichever theme someone chose on the portfolio is the
+one this opens in, and changing it here follows them back. The key name is a
+contract, and there is a test that says so.
 
 ## Bring your own key
 
