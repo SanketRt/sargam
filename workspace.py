@@ -72,6 +72,15 @@ def data_root() -> pathlib.Path:
     return pathlib.Path(os.environ.get("SARGAM_DATA", "/data/users")).resolve()
 
 
+def accounts_path() -> pathlib.Path:
+    """The control-plane database. Beside the users directory, not inside it:
+    it is not anyone's workspace and must never be reachable by a user id."""
+    env = os.environ.get("SARGAM_ACCOUNTS")
+    if env:
+        return pathlib.Path(env).resolve()
+    return data_root().parent / "accounts.db"
+
+
 def for_user(user_id: str, root: pathlib.Path | None = None) -> Workspace:
     """A hosted user's workspace."""
     base = (root or data_root()).resolve()

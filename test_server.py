@@ -29,9 +29,23 @@ except ImportError:
     print("skip  FastAPI not installed (pip install -r requirements.txt)")
     raise SystemExit(0)
 
+import base64
+import json
+
+import accounts as ACC
 import api
 import extract
 import workspace as W
+
+SECRET = "test-secret-not-a-real-one"
+
+
+def signed_session(payload: dict, secret: str = SECRET) -> str:
+    """A cookie in the shape SessionMiddleware produces, so the session path
+    can be exercised without standing up Google."""
+    from itsdangerous import TimestampSigner
+    data = base64.b64encode(json.dumps(payload).encode())
+    return TimestampSigner(secret).sign(data).decode()
 
 
 def _seed(store, text: str) -> None:
@@ -51,9 +65,14 @@ class tmproot:
         return False
 
 
-def _fresh_server(root: pathlib.Path):
+def _fresh_server(root: pathlib.Path, **env):
     """A server module bound to this root, with a swappable caller."""
     import importlib
+    os.environ.setdefault("SARGAM_SECRET", SECRET)
+    os.environ["SARGAM_ACCOUNTS"] = str(root / "accounts.db")
+    os.environ.pop("SARGAM_SINGLE", None)
+    for k, v in env.items():
+        os.environ[k] = v
     import server as srv
     importlib.reload(srv)
     srv.registry.close()
@@ -150,10 +169,133 @@ def test_page_knows_its_prefix() -> None:
     print("ok  the page builds every URL from the prefix it was served under")
 
 
+def test_the_session_cookie_decides_the_workspace() -> None:
+    """The only thing that may name a workspace is the signed cookie. A
+    header, a query parameter or a body field naming another user must do
+    nothing at all."""
+    with tmproot() as root:
+        acc = ACC.Accounts(root / "accounts.db")
+        alice = acc.upsert_google({"sub": "google-alice", "email": "a@x.com",
+                                   "name": "Alice"})
+        bob = acc.upsert_google({"sub": "google-bob", "email": "b@x.com",
+                                 "name": "Bob"})
+        acc.close()
+
+        sa = W.for_user(alice["id"], root).open()
+        _seed(sa, "Alice married in April 1986.")
+        sa.close()
+        sb = W.for_user(bob["id"], root).open()
+        _seed(sb, "Bob started at the mill in 1977.")
+        sb.close()
+
+        srv = _fresh_server(root)
+        c = TestClient(srv.app)
+
+        c.cookies.set("sargam_session", signed_session({"uid": alice["id"]}))
+        seen = {e["summary"] for e in c.get("/api/state").json()["events"]}
+        assert any("1986" in s for s in seen), seen
+        assert not any("1977" in s for s in seen), "saw Bob's material"
+
+        me = c.get("/api/me").json()
+        assert me["email"] == "a@x.com", me
+
+        # Naming Bob every way a caller can. None may work.
+        for kwargs in ({"headers": {"X-User": bob["id"]}},
+                       {"params": {"user": bob["id"], "uid": bob["id"]}}):
+            got = {e["summary"] for e in c.get("/api/state", **kwargs)
+                   .json()["events"]}
+            assert got == seen, f"request-supplied id changed the workspace: {kwargs}"
+
+        r = c.post("/api/compile", json={"user": bob["id"], "uid": bob["id"]})
+        assert r.json().get("ok"), r.text
+        after = {e["summary"] for e in c.get("/api/state").json()["events"]}
+        assert after == seen, "a body field switched workspaces"
+        srv.registry.close()
+    print("ok  only the signed cookie decides whose workspace is served")
+
+
+def test_a_forged_cookie_is_refused() -> None:
+    with tmproot() as root:
+        srv = _fresh_server(root)
+        c = TestClient(srv.app)
+        for bad in [signed_session({"uid": "../../etc"}),
+                    signed_session({"uid": "u123"}, secret="wrong-secret"),
+                    "not-a-cookie-at-all"]:
+            c.cookies.set("sargam_session", bad)
+            r = c.get("/api/state")
+            assert r.status_code in (400, 401, 403),                 f"forged cookie accepted: {bad[:24]}... -> {r.status_code}"
+            assert "events" not in r.text
+        srv.registry.close()
+    print("ok  a forged or unsafe session cookie is refused")
+
+
+def test_logout_clears_the_session() -> None:
+    with tmproot() as root:
+        acc = ACC.Accounts(root / "accounts.db")
+        u = acc.upsert_google({"sub": "google-carol", "email": "c@x.com",
+                               "name": "Carol"})
+        acc.close()
+        srv = _fresh_server(root)
+        c = TestClient(srv.app)
+        c.cookies.set("sargam_session", signed_session({"uid": u["id"]}))
+        assert c.get("/api/me").status_code == 200
+
+        r = c.get("/auth/logout", follow_redirects=False)
+        # The contract is the Set-Cookie, not the test client's jar: a cookie
+        # injected by hand has no domain, so httpx will not match the delete
+        # against it the way a browser would.
+        sc = r.headers.get("set-cookie", "")
+        assert "sargam_session=" in sc, sc
+        assert "01 Jan 1970" in sc or "Max-Age=0" in sc, \
+            f"logout did not expire the cookie: {sc}"
+
+        c.cookies.clear()
+        assert c.get("/api/me").status_code == 401, "no cookie still signed in"
+        srv.registry.close()
+    print("ok  logout expires the session cookie")
+
+
+def test_accounts_refuse_a_default_secret() -> None:
+    """A session key that changes on restart, or is shared, is not a key. The
+    server must refuse to serve accounts rather than pick something."""
+    saved = os.environ.pop("SARGAM_SECRET", None)
+    try:
+        with tmproot() as root:
+            os.environ["SARGAM_ACCOUNTS"] = str(root / "accounts.db")
+            os.environ.pop("SARGAM_SINGLE", None)
+            import importlib
+            import server as srv
+            try:
+                importlib.reload(srv)
+            except RuntimeError as exc:
+                assert "SARGAM_SECRET" in str(exc), exc
+            else:
+                raise AssertionError("served accounts with no session secret")
+    finally:
+        if saved is not None:
+            os.environ["SARGAM_SECRET"] = saved
+    print("ok  the server refuses to serve accounts without a session secret")
+
+
+def test_account_ids_are_derived_not_taken() -> None:
+    hostile = "../../../etc/passwd"
+    uid = ACC.derive_id(hostile)
+    assert W.SAFE_ID.match(uid), uid
+    assert hostile not in uid and "/" not in uid
+    assert ACC.derive_id("abc") == ACC.derive_id("abc"), "not stable"
+    assert ACC.derive_id("abc") != ACC.derive_id("abd"), "collides"
+    print("ok  account ids are derived, so a hostile subject cannot escape")
+
+
 if __name__ == "__main__":
     test_both_transports_agree()
     test_requests_reach_only_their_own_workspace()
     test_unauthenticated_gets_nothing()
     test_failures_do_not_leak_internals()
     test_page_knows_its_prefix()
+    test_the_session_cookie_decides_the_workspace()
+    test_a_forged_cookie_is_refused()
+    test_logout_clears_the_session()
+    test_accounts_refuse_a_default_secret()
+    test_account_ids_are_derived_not_taken()
     print("\nall server properties hold")

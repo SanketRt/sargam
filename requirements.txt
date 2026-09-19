@@ -6,3 +6,4 @@ numpy>=1.26
 fastapi>=0.115
 uvicorn[standard]>=0.30
 itsdangerous>=2.2
+authlib>=1.3

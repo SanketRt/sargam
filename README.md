@@ -41,6 +41,7 @@ schema downstream changes.
 | `ground.py` | per-sentence anti-fabrication verdicts |
 | `publish.py` | markdown out, one git commit per compile |
 | `workspace.py` | per-user paths and the user-id check |
+| `accounts.py` | identity: who has an account, kept apart from their material |
 | `cli.py` | the command surface |
 | `api.py` | the review UI's handlers, with no transport in them |
 | `web.py` | local transport, standard library only |
@@ -196,6 +197,43 @@ is built to prevent.
 23. An unauthenticated request is refused with no data.
 24. A handler failure returns no server internals.
 25. The page builds every URL from the prefix it was served under.
+26. Only the signed cookie decides whose workspace is served.
+27. A forged or unsafe session cookie is refused.
+28. Logout expires the session cookie.
+29. The server refuses to serve accounts without a session secret.
+30. Account ids are derived, so a hostile subject cannot escape.
+
+## Hosting
+
+`server.py` serves accounts behind a reverse proxy. Identity is Google OIDC;
+the session is a signed cookie carrying nothing but an opaque account id.
+
+| variable | meaning |
+|---|---|
+| `SARGAM_SECRET` | session signing key. **Required** -- the server refuses to serve accounts without it rather than pick a default. |
+| `SARGAM_PUBLIC_URL` | the address the browser uses, e.g. `https://sanketr.com` |
+| `SARGAM_BASE_PATH` | the prefix the proxy keeps, e.g. `/projects/sargam` |
+| `SARGAM_DATA` | where per-user workspaces live |
+| `SARGAM_ACCOUNTS` | the accounts database (defaults beside `SARGAM_DATA`) |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth credentials |
+| `SARGAM_SINGLE` | run as one local user with no accounts |
+
+The redirect URI registered with Google must be the **public** one, prefix
+included -- `SARGAM_PUBLIC_URL + SARGAM_BASE_PATH + /auth/callback`. The
+server prints it via `server.redirect_uri()`.
+
+Three things are deliberate rather than incidental:
+
+* **The account id is derived from Google's subject, never taken from it.**
+  It becomes a directory name, so it has to satisfy the id check by
+  construction; and a stable identifier for a real person does not belong in
+  filesystem paths or log lines.
+* **The session cookie is scoped to `SARGAM_BASE_PATH`**, not `/`. A domain
+  hosting several proxied projects would otherwise send this session to all
+  of them.
+* **No Google tokens are stored.** Nothing calls Google again after
+  identifying the person, so keeping them would be holding a credential for
+  no reason.
 
 ## Known limits
 

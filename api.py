@@ -235,6 +235,13 @@ summary{cursor:pointer;font-size:12px;color:var(--dim)}
 .tag.w{color:var(--warn);border-color:var(--warn)}
 .tag.o{color:var(--ok);border-color:var(--ok)}
 .empty{color:var(--dim);font-size:13px}
+.signin{text-align:center;padding:40px 16px;max-width:30rem;margin:0 auto}
+.signin h3{margin:0 0 10px;font-size:19px}
+.signin .empty{margin:0 auto 20px}
+.err{color:var(--bad);font-size:13px;margin:0 0 16px}
+.btn{display:inline-block;padding:9px 18px;border-radius:8px;
+ background:var(--accent);color:var(--bg);text-decoration:none;font-weight:600}
+#who a{color:var(--accent)}
 #toast{position:fixed;left:50%;transform:translateX(-50%);
  bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--fg);
  color:var(--bg);padding:8px 16px;border-radius:99px;font-size:13px;opacity:0;
@@ -245,6 +252,7 @@ summary{cursor:pointer;font-size:12px;color:var(--dim)}
   <h1>sargam</h1>
   <span class="stat" id="stats"></span>
   <span style="flex:1"></span>
+  <span class="stat" id="who"></span>
   <button onclick="compile()">Recompile</button>
 </header>
 <main>
@@ -272,7 +280,30 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;
 async function post(path,body){
  const r=await fetch(BASE+path,{method:'POST',headers:{'content-type':'application/json'},
   body:JSON.stringify(body)});return r.json();}
-async function load(){S=await(await fetch(BASE+'/api/state')).json();draw();}
+let ME=null;
+async function load(){
+ const r=await fetch(BASE+'/api/state');
+ if(r.status===401){signedOut();return;}
+ S=await r.json();
+ try{ME=await(await fetch(BASE+'/api/me')).json();}catch(e){ME=null;}
+ draw();
+}
+function signedOut(){
+ const p=new URLSearchParams(location.search), err=p.get('error');
+ const msg=err==='unverified'
+   ? 'That Google account has no verified email address.'
+   : err ? 'Sign-in did not complete. Please try again.' : '';
+ document.getElementById('stats').textContent='';
+ document.getElementById('question').innerHTML='';
+ document.getElementById('timeline').innerHTML='';
+ document.getElementById('paras').innerHTML=
+  `<div class="signin"><h3>Your memoir, in order</h3>
+   <p class="empty">Chat in, chronologically ordered book out. Sign in to
+   keep your material between visits \u2014 it stays yours, and you can export
+   or delete all of it at any time.</p>
+   ${msg?`<p class="err">${esc(msg)}</p>`:''}
+   <a class="btn" href="${BASE}/auth/login">Continue with Google</a></div>`;
+}
 
 function draw(){
  const p=S.pending,c=S.counts;
@@ -280,6 +311,9 @@ function draw(){
   `<b>${S.events.length}</b> events &middot; <b>${S.paragraphs.length}</b> paragraphs `
   +`&middot; <b>${p.placement}</b> unplaced &middot; <b>${p.flagged}</b> flagged`
   +(c.unsupported?` &middot; <b style="color:var(--bad)">${c.unsupported}</b> unsupported`:'');
+ const who=document.getElementById('who');
+ who.innerHTML=(ME&&ME.signed_in&&!ME.single_user)
+  ?`${esc(ME.email||ME.name||'')} &nbsp;<a href="${BASE}/auth/logout">Sign out</a>`:'';
 
  document.getElementById('timeline').innerHTML=S.events.length?S.events.map(e=>
   `<div class="ev ${e.loose?'loose':''}"><span class="yr">${esc(e.year)}</span>
